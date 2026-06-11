@@ -1,20 +1,16 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import SenderApp from './src/SenderApp';
+import DriverApp from './src/DriverApp';
 
 export default function App() {
-  return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
-  );
-}
+  // This reads the secret tag from your terminal command
+  const appRole = process.env.EXPO_PUBLIC_APP_ROLE;
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+  // If the command specifies 'driver', load the Driver Radar
+  if (appRole === 'driver') {
+    return <DriverApp />;
+  }
+
+  // Otherwise, default to the Sender Portal
+  return <SenderApp />;
+}

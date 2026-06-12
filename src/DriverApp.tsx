@@ -811,10 +811,11 @@ export default function App() {
       {Platform.OS === 'web' ? (
         <View style={StyleSheet.absoluteFill}>
           {/* @ts-ignore */}
-          <iframe
-            src={`https://maps.google.com/maps?q=${mapCenter.latitude},${mapCenter.longitude}&z=13&output=embed`}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-          />
+        <iframe
+  title="Live Map"
+  src={`http://googleusercontent.com/maps.google.com/maps?q=${mapCenter.latitude},${mapCenter.longitude}&z=13&output=embed`}
+  className="w-full h-full border-0"
+/>
         </View>
       ) : (
         <MapView
@@ -1369,6 +1370,11 @@ const styles = StyleSheet.create({
     color: C.white,
     letterSpacing: -1.2,
   },
+  mapIframe: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 0,
+  },
 
   // ---------- Auth (dark) ----------
   authContainer: {
@@ -1809,6 +1815,10 @@ const styles = StyleSheet.create({
   },
   distText: { color: C.orange, fontSize: 12, fontWeight: '800', marginLeft: 8 },
 
+  connectorLine: { width: 2, height: 16, backgroundColor: C.gray700, marginLeft: 8, marginVertical: 6 },
+  dotOrange: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.orange },
+  dotWhite: { width: 10, height: 10, borderRadius: 2, backgroundColor: C.white },
+
   actionRow: { flexDirection: 'row', gap: 10 },
   btnNavigate: {
     flex: 1,
@@ -1832,7 +1842,7 @@ const styles = StyleSheet.create({
 
   // ---------- Activity / Profile screens ----------
   screen: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: C.black,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 68 : 52,

@@ -105,8 +105,6 @@ Delivered
 
 # 📷 AR Volumetric Scanner
 
-### Currently In Development
-
 Instead of typing package dimensions manually:
 
 📱 Open Camera

@@ -16,6 +16,8 @@ import {
   ScrollView,
   Keyboard,
   Linking,
+  Image,
+  Vibration,
 } from 'react-native';
 import {
   createUserWithEmailAndPassword,
@@ -188,10 +190,20 @@ export default function App() {
   // Driver state
   const [online, setOnline] = useState(false);
   const [availableJobs, setAvailableJobs] = useState<any[]>([]);
+  const [declinedJobs, setDeclinedJobs] = useState<string[]>([]); // Memory for cancelled/declined jobs
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [ticker, setTicker] = useState(Date.now()); // Live clock for 60s countdown
+
+  // AI Relay Route State
+  const [showRouteModal, setShowRouteModal] = useState(false);
+  const [routeStart, setRouteStart] = useState('');
+  const [routeEnd, setRouteEnd] = useState('');
+
+  // AI Combined Pooling State
+  const [showPoolModal, setShowPoolModal] = useState(false);
 
   // Navigation + history + sheet
   const [activeTab, setActiveTab] = useState<TabKey>('home');
@@ -203,6 +215,7 @@ export default function App() {
   const [locationDenied, setLocationDenied] = useState(false);
   const coordsRef = useRef<LatLng | null>(null);
   const mapRef = useRef<any>(null);
+  const mapIframeRef = useRef<any>(null);
 
   // Animations / rotating tips
   const pulse = useRef(new Animated.Value(1)).current;
@@ -210,10 +223,35 @@ export default function App() {
   const bobAnim = useRef(new Animated.Value(0)).current;
   const [tipIndex, setTipIndex] = useState(0);
 
-  // Derived
+  // Derived Values
   const jobStatus: string | undefined = activeJob?.status;
   const isScanning = online && !activeJobId;
   const truckActive = jobStatus === 'picked_up';
+
+  // Tick the clock every second to power the 60s countdown
+  useEffect(() => {
+    const t = setInterval(() => setTicker(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const jobsSorted = [...availableJobs].sort((a, b) => {
+    if (!coords) return 0;
+    const da = a.pickup_coords ? distKm(coords, a.pickup_coords) : 99999;
+    const dbb = b.pickup_coords ? distKm(coords, b.pickup_coords) : 99999;
+    return da - dbb;
+  });
+
+  // Filter out declined jobs OR jobs older than 60 seconds
+  const visibleJobs = jobsSorted.filter((job) => {
+    if (declinedJobs.includes(job.id)) return false;
+    const ageSecs = job.created_at ? Math.floor((ticker - (job.created_at?.toMillis?.() || ticker)) / 1000) : 0;
+    return ageSecs <= 60;
+  });
+
+  const pickupDistance =
+    activeJob?.pickup_coords && coords ? distKm(coords, activeJob.pickup_coords) : null;
+  const dropDistance =
+    activeJob?.dropoff_coords && coords ? distKm(coords, activeJob.dropoff_coords) : null;
 
   useEffect(() => {
     coordsRef.current = coords;
@@ -310,9 +348,13 @@ export default function App() {
   // Centre the map on the driver the first time we get a fix
   const centeredOnce = useRef(false);
   useEffect(() => {
-    if (coords && mapRef.current && Platform.OS !== 'web' && !centeredOnce.current) {
+    if (coords && !centeredOnce.current) {
       centeredOnce.current = true;
-      mapRef.current.animateToRegion({ ...coords, latitudeDelta: 0.03, longitudeDelta: 0.03 }, 800);
+      if (Platform.OS === 'web' && mapIframeRef.current) {
+         mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'flyTo', lat: coords.latitude, lng: coords.longitude }), '*');
+      } else if (mapRef.current && Platform.OS !== 'web') {
+         mapRef.current.animateToRegion({ ...coords, latitudeDelta: 0.03, longitudeDelta: 0.03 }, 800);
+      }
     }
   }, [coords]);
 
@@ -337,6 +379,8 @@ export default function App() {
         );
         const snap = await getDocs(q);
         if (!snap.empty) {
+          // OPTIMISTIC UI FIX: Eagerly set the active job data before snapshot loads
+          setActiveJob({ id: snap.docs[0].id, ...snap.docs[0].data() });
           setActiveJobId(snap.docs[0].id);
           setOnline(true);
         }
@@ -347,8 +391,7 @@ export default function App() {
   }, [user]);
 
   // ------------------------------------------
-  // 5. LIVE LISTENER on the active job — reflects
-  //    sender-side changes (e.g. cancellation) instantly
+  // 5. LIVE LISTENER on the active job
   // ------------------------------------------
   useEffect(() => {
     if (!activeJobId) return;
@@ -371,13 +414,14 @@ export default function App() {
   }, [activeJobId]);
 
   // ------------------------------------------
-  // 6. AVAILABLE SHIPMENTS — live feed while online & free
+  // 6. AVAILABLE SHIPMENTS — live feed while online
   // ------------------------------------------
   useEffect(() => {
-    if (!user || !online || activeJobId) {
+    if (!user || !online) {
       setAvailableJobs([]);
       return;
     }
+    // Driver can see available jobs even if they have an active one (for Pooling)
     const q = query(collection(db, 'Packages'), where('status', '==', 'searching'), limit(25));
     const unsub = onSnapshot(
       q,
@@ -387,10 +431,64 @@ export default function App() {
       () => {}
     );
     return unsub;
-  }, [user, online, activeJobId]);
+  }, [user, online]);
 
   // ------------------------------------------
-  // 7. ACTIVITY — this driver's past jobs
+  // UPDATE WEB MAP MARKERS DYNAMICALLY
+  // ------------------------------------------
+  useEffect(() => {
+    if (Platform.OS === 'web' && mapIframeRef.current) {
+      const availablePayload = online 
+        ? visibleJobs.filter(j => j.pickup_coords).map(j => ({lat: j.pickup_coords.latitude, lng: j.pickup_coords.longitude}))
+        : [];
+        
+      mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({
+        type: 'updateMarkers',
+        driver: coords ? { lat: coords.latitude, lng: coords.longitude } : null,
+        pickup: activeJob?.pickup_coords ? { lat: activeJob.pickup_coords.latitude, lng: activeJob.pickup_coords.longitude } : null,
+        drop: activeJob?.dropoff_coords ? { lat: activeJob.dropoff_coords.latitude, lng: activeJob.dropoff_coords.longitude } : null,
+        available: availablePayload
+      }), '*');
+    }
+  }, [coords, activeJob, online, visibleJobs]);
+
+  // ------------------------------------------
+  // 7. 60-SECOND ALARM SOUND / VIBRATION FOR NEW JOBS
+  // ------------------------------------------
+  useEffect(() => {
+    let audio: any = null;
+    let interval: any = null;
+    let timeout: any = null;
+
+    if (online && visibleJobs.length > 0 && !activeJobId) {
+      if (Platform.OS === 'web') {
+        try {
+          audio = new window.Audio('https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg');
+          audio.loop = true;
+          audio.play().catch(() => {});
+        } catch (e) {}
+      } else {
+        // Vibrate continuously on native devices
+        interval = setInterval(() => Vibration.vibrate(500), 2000);
+      }
+
+      // Stop the alarm forcefully after 60 seconds
+      timeout = setTimeout(() => {
+        if (audio) { audio.pause(); audio.currentTime = 0; }
+        if (interval) clearInterval(interval);
+      }, 60000);
+    }
+
+    return () => {
+      if (audio) { audio.pause(); audio.currentTime = 0; }
+      if (interval) clearInterval(interval);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [online, visibleJobs.length, activeJobId]);
+
+
+  // ------------------------------------------
+  // 8. ACTIVITY — this driver's past jobs
   // ------------------------------------------
   useEffect(() => {
     if (!user) {
@@ -413,27 +511,32 @@ export default function App() {
   }, [user]);
 
   // ------------------------------------------
-  // 8. PING DRIVER LOCATION to the job doc while active
-  //    (the sender app can show the driver moving later)
+  // 9. LIVE UBER TRACKING (FAST 4-SECOND PING)
+  //    Updates location for ALL packages driver is carrying
   // ------------------------------------------
   useEffect(() => {
-    if (!activeJobId) return;
+    if (!online || history.length === 0) return;
+    const activeJobs = history.filter(h => ACTIVE_STATUSES.includes(h.status));
+    if (activeJobs.length === 0) return;
+
     const push = async () => {
       const c = coordsRef.current;
       if (!c) return;
       try {
-        await updateDoc(doc(db, 'Packages', activeJobId), {
-          driver_coords: new GeoPoint(c.latitude, c.longitude),
-          driver_updated_at: serverTimestamp(),
+        activeJobs.forEach(job => {
+           updateDoc(doc(db, 'Packages', job.id), {
+             driver_coords: new GeoPoint(c.latitude, c.longitude),
+             driver_updated_at: serverTimestamp(),
+           });
         });
       } catch {
         // transient network issues are fine
       }
     };
     push();
-    const id = setInterval(push, 15000);
+    const id = setInterval(push, 4000); // 4 seconds for real-time tracking
     return () => clearInterval(id);
-  }, [activeJobId]);
+  }, [online, history]);
 
   // Pulse + rotating tips while scanning for shipments
   useEffect(() => {
@@ -482,7 +585,7 @@ export default function App() {
   const truckBob = bobAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
 
   // ------------------------------------------
-  // 9. FIREBASE AUTHENTICATION (with driver profile)
+  // 10. FIREBASE AUTHENTICATION (with driver profile)
   // ------------------------------------------
   const handleAuthentication = async () => {
     if (!email || !password) {
@@ -522,8 +625,7 @@ export default function App() {
   };
 
   // ------------------------------------------
-  // 10. ACCEPT A SHIPMENT — transaction-safe so two
-  //     drivers can never take the same job
+  // 11. ACCEPT A SHIPMENT — transaction-safe
   // ------------------------------------------
   const acceptJob = async (job: any) => {
     if (!user || acceptingId) return;
@@ -543,15 +645,21 @@ export default function App() {
           accepted_at: serverTimestamp(),
         });
       });
+      // OPTIMISTIC UI FIX: Eagerly set the active job data so it instantly displays
+      setActiveJob({ ...job, status: 'accepted' });
       setActiveJobId(job.id);
       setSheetCollapsed(false);
       // Fit the map to driver + pickup
       const p = job.pickup_coords;
-      if (p && coords && mapRef.current && Platform.OS !== 'web') {
-        mapRef.current.fitToCoordinates(
-          [coords, { latitude: p.latitude, longitude: p.longitude }],
-          { edgePadding: { top: 140, bottom: 440, left: 70, right: 70 }, animated: true }
-        );
+      if (p && coords) {
+        if (Platform.OS === 'web' && mapIframeRef.current) {
+            mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'fitBounds', lat1: coords.latitude, lng1: coords.longitude, lat2: p.latitude, lng2: p.longitude }), '*');
+        } else if (mapRef.current && Platform.OS !== 'web') {
+            mapRef.current.fitToCoordinates(
+              [coords, { latitude: p.latitude, longitude: p.longitude }],
+              { edgePadding: { top: 140, bottom: 440, left: 70, right: 70 }, animated: true }
+            );
+        }
       }
     } catch {
       notify('Too late', 'Another driver just took this shipment.');
@@ -560,8 +668,13 @@ export default function App() {
     }
   };
 
+  // Decline a job (local memory so it hides)
+  const declineJob = (jobId: string) => {
+    setDeclinedJobs(prev => [...prev, jobId]);
+  };
+
   // ------------------------------------------
-  // 11. PROGRESS THE JOB:  accepted → picked_up → delivered
+  // 12. PROGRESS THE JOB:  accepted → picked_up → delivered
   // ------------------------------------------
   const advanceStatus = async () => {
     if (!activeJobId || !jobStatus) return;
@@ -575,14 +688,19 @@ export default function App() {
         if (next === 'picked_up') update.picked_up_at = serverTimestamp();
         if (next === 'delivered') update.delivered_at = serverTimestamp();
         await updateDoc(doc(db, 'Packages', activeJobId), update);
-        // After pickup, point the camera toward the drop (if it has coordinates)
+        
+        // After pickup, point the map toward the drop
         if (next === 'picked_up') {
           const d = activeJob?.dropoff_coords;
-          if (d && coords && mapRef.current && Platform.OS !== 'web') {
-            mapRef.current.fitToCoordinates(
-              [coords, { latitude: d.latitude, longitude: d.longitude }],
-              { edgePadding: { top: 140, bottom: 440, left: 70, right: 70 }, animated: true }
-            );
+          if (d && coords) {
+            if (Platform.OS === 'web' && mapIframeRef.current) {
+                mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'fitBounds', lat1: coords.latitude, lng1: coords.longitude, lat2: d.latitude, lng2: d.longitude }), '*');
+            } else if (mapRef.current && Platform.OS !== 'web') {
+                mapRef.current.fitToCoordinates(
+                  [coords, { latitude: d.latitude, longitude: d.longitude }],
+                  { edgePadding: { top: 140, bottom: 440, left: 70, right: 70 }, animated: true }
+                );
+            }
           }
         }
       } catch {
@@ -599,7 +717,7 @@ export default function App() {
     }
   };
 
-  // Release the job back to the pool (allowed before pickup only)
+  // Release the job back to the pool
   const releaseJob = () => {
     if (!activeJobId) return;
     confirmAsk(
@@ -607,6 +725,7 @@ export default function App() {
       'It will go back to the pool so another driver can take it.',
       async () => {
         try {
+          setDeclinedJobs(prev => [...prev, activeJobId]); // Bug Fix: Add to memory so it doesn't pop up again
           await updateDoc(doc(db, 'Packages', activeJobId), {
             status: 'searching',
             driver_id: null,
@@ -618,6 +737,39 @@ export default function App() {
           setActiveJob(null);
         } catch {
           notify('Could not release', 'Check your connection and try again.');
+        }
+      }
+    );
+  };
+
+  // ------------------------------------------
+  // AI RELAY TRANSFER LOGIC
+  // ------------------------------------------
+  const transferToRelay = async () => {
+    if (!activeJobId) return;
+    confirmAsk(
+      'Transfer to Relay Hub?',
+      'This drops the package at the nearest AI relay node. The next overlapping driver will automatically be assigned to carry it further.',
+      async () => {
+        setActionLoading(true);
+        try {
+          setDeclinedJobs(prev => [...prev, activeJobId]); // Bug Fix: Hide it locally after relay
+          await updateDoc(doc(db, 'Packages', activeJobId), {
+            status: 'searching', // Sends it back into the pool for the next driver
+            pickup_name: `Relay Node (${driverProfile?.name || 'Driver'} dropped)`,
+            pickup_coords: coords ? new GeoPoint(coords.latitude, coords.longitude) : activeJob?.pickup_coords,
+            driver_id: null,
+            driver_name: null,
+            driver_vehicle: null,
+            driver_coords: null,
+          });
+          setActiveJobId(null);
+          setActiveJob(null);
+          notify('Relay Successful', 'Package handed off to the AI relay network. It is now broadcasting to drivers in the next sector.');
+        } catch {
+          notify('Error', 'Could not transfer package.');
+        } finally {
+          setActionLoading(false);
         }
       }
     );
@@ -638,8 +790,9 @@ export default function App() {
       notify('No coordinates', 'This stop has no pinned location to navigate to.');
       return;
     }
+    // Launch actual Google Maps navigation route directly to coordinates
     Linking.openURL(
-      `https://www.google.com/maps/dir/?api=1&destination=${target.latitude},${target.longitude}`
+      `maps.google.com/maps?q={target.latitude},${target.longitude}`
     );
   };
 
@@ -786,18 +939,67 @@ export default function App() {
   const userInitial = (driverProfile?.name?.[0] ?? user.email?.[0] ?? 'D').toUpperCase();
   const deliveredCount = history.filter((h) => h.status === 'delivered').length;
 
-  // Sort the live feed by distance from the driver
-  const jobsSorted = [...availableJobs].sort((a, b) => {
-    if (!coords) return 0;
-    const da = a.pickup_coords ? distKm(coords, a.pickup_coords) : 99999;
-    const dbb = b.pickup_coords ? distKm(coords, b.pickup_coords) : 99999;
-    return da - dbb;
-  });
+  // Generate Leaflet Interactive Map HTML for Web
+  const leafletMapHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([${mapCenter.latitude}, ${mapCenter.longitude}], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
 
-  const pickupDistance =
-    activeJob?.pickup_coords && coords ? distKm(coords, activeJob.pickup_coords) : null;
-  const dropDistance =
-    activeJob?.dropoff_coords && coords ? distKm(coords, activeJob.dropoff_coords) : null;
+        let driverMarker = null;
+        let pickupMarker = null;
+        let dropMarker = null;
+        let availableMarkers = [];
+
+        const driverIcon = L.divIcon({ html: '<div style="font-size:24px; background:white; border-radius:50%; width:30px; height:30px; display:flex; justify-content:center; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.3)">🛻</div>', className: '', iconSize: [30, 30], iconAnchor: [15, 15] });
+        const orangeIcon = L.divIcon({ html: '<div style="font-size:24px">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+        const blackIcon = L.divIcon({ html: '<div style="font-size:24px; filter: grayscale(1)">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+
+        window.addEventListener('message', (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'flyTo') {
+              map.flyTo([data.lat, data.lng], 14, { animate: true, duration: 1.5 });
+            }
+            if (data.type === 'fitBounds') {
+              const bounds = L.latLngBounds([data.lat1, data.lng1], [data.lat2, data.lng2]);
+              map.flyToBounds(bounds, { padding: [50, 50], maxZoom: 15, duration: 1.5 });
+            }
+            if (data.type === 'updateMarkers') {
+              if (driverMarker) map.removeLayer(driverMarker);
+              if (pickupMarker) map.removeLayer(pickupMarker);
+              if (dropMarker) map.removeLayer(dropMarker);
+              availableMarkers.forEach(m => map.removeLayer(m));
+              availableMarkers = [];
+
+              if (data.driver) driverMarker = L.marker([data.driver.lat, data.driver.lng], {icon: driverIcon, zIndexOffset: 1000}).addTo(map);
+              if (data.pickup) pickupMarker = L.marker([data.pickup.lat, data.pickup.lng], {icon: orangeIcon}).addTo(map);
+              if (data.drop) dropMarker = L.marker([data.drop.lat, data.drop.lng], {icon: blackIcon}).addTo(map);
+              
+              if (data.available && data.available.length > 0) {
+                 data.available.forEach(job => {
+                    const m = L.marker([job.lat, job.lng], {icon: orangeIcon}).addTo(map);
+                    availableMarkers.push(m);
+                 });
+              }
+            }
+          } catch(e) {}
+        });
+      </script>
+    </body>
+    </html>
+  `;
 
   return (
     <View style={styles.appRoot}>
@@ -807,15 +1009,88 @@ export default function App() {
         translucent
       />
 
+      {/* ---------- AI POOLING MODAL ---------- */}
+      {showPoolModal && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 110, justifyContent: 'center', padding: 20 }]}>
+          <View style={styles.routeCard}>
+             <Text style={styles.routeTitle}>AI Route Pooling</Text>
+             <Text style={styles.routeSub}>Scanning for packages overlapping with your current trajectory...</Text>
+             <ScrollView style={{maxHeight: height * 0.5}}>
+                {visibleJobs.length === 0 ? <Text style={{color: C.gray400}}>No overlapping packages found right now.</Text> : visibleJobs.map(job => {
+                  const p = job.pickup_coords;
+                  const d = job.dropoff_coords;
+                  const tripDist = p && d ? distKm(p, d) : 10;
+                  const estPrice = Math.round(150 + (tripDist * 14)); // Pricing Formula
+
+                  return (
+                   <View key={job.id} style={styles.jobCard}>
+                     <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                       {job.cargo_image && (
+                          <Image source={{uri: job.cargo_image}} style={{width: 50, height: 50, borderRadius: 8, marginRight: 12, backgroundColor: C.black}} />
+                       )}
+                       <View style={{flex: 1}}>
+                         <View style={styles.jobTop}>
+                           <Text style={styles.jobItem} numberOfLines={1}>{job.item_name}</Text>
+                           <Text style={styles.jobPrice}>₹{estPrice}</Text>
+                         </View>
+                         <Text style={styles.jobRoute} numberOfLines={1}>
+                           {(job.pickup_name ?? 'Current location') + '  →  ' + job.destination_name}
+                         </Text>
+                       </View>
+                     </View>
+                     <TouchableOpacity style={[styles.acceptBtn, {marginTop: 10}]} onPress={() => { acceptJob(job); setShowPoolModal(false); }}>
+                        <Text style={styles.acceptBtnText}>Add to Pool</Text>
+                     </TouchableOpacity>
+                   </View>
+                  );
+                })}
+             </ScrollView>
+             <TouchableOpacity style={{marginTop: 15, padding: 15, backgroundColor: C.charcoal, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: C.line}} onPress={() => setShowPoolModal(false)}>
+                <Text style={{color: C.white, fontWeight: '700'}}>Close</Text>
+             </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* ---------- AI RELAY ROUTE MODAL ---------- */}
+      {showRouteModal && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100, justifyContent: 'center', padding: 24 }]}>
+          <View style={styles.routeCard}>
+            <Text style={styles.routeTitle}>Set Your Relay Route</Text>
+            <Text style={styles.routeSub}>Enter your path so the AI can match you with overlapping shipments along your journey.</Text>
+
+            <Text style={styles.inputLabel}>Starting point</Text>
+            <TextInput style={styles.inputBox} placeholder="e.g. Guwahati" placeholderTextColor={C.gray500} value={routeStart} onChangeText={setRouteStart} />
+
+            <Text style={styles.inputLabel}>Destination</Text>
+            <TextInput style={styles.inputBox} placeholder="e.g. Shillong" placeholderTextColor={C.gray500} value={routeEnd} onChangeText={setRouteEnd} />
+
+            <View style={{flexDirection: 'row', gap: 10}}>
+              <TouchableOpacity style={[styles.btnOutline, {flex: 1}]} onPress={() => setShowRouteModal(false)}>
+                <Text style={styles.btnOutlineText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btnCta, {flex: 2}]} onPress={() => {
+                if(!routeStart || !routeEnd) { notify('Missing route', 'Please enter your start and end points.'); return; }
+                setShowRouteModal(false);
+                setOnline(true);
+              }}>
+                <Text style={styles.btnCtaText}>Go Online</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* ---------- FULL-SCREEN SCROLLABLE MAP ---------- */}
       {Platform.OS === 'web' ? (
-        <View style={StyleSheet.absoluteFill}>
+        <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]}>
           {/* @ts-ignore */}
-        <iframe
-  title="Live Map"
-  src={`http://googleusercontent.com/maps.google.com/maps?q=${mapCenter.latitude},${mapCenter.longitude}&z=13&output=embed`}
-  className="w-full h-full border-0"
-/>
+          <iframe
+            ref={mapIframeRef}
+            title="Interactive Web Map"
+            srcDoc={leafletMapHtml}
+            style={styles.mapIframe as any}
+          />
         </View>
       ) : (
         <MapView
@@ -851,7 +1126,7 @@ export default function App() {
           {/* Available shipment pins while browsing */}
           {!activeJob &&
             online &&
-            jobsSorted.map(
+            visibleJobs.map(
               (j) =>
                 j.pickup_coords && (
                   <Marker
@@ -885,7 +1160,11 @@ export default function App() {
                   notify('Finish your job first', 'Complete or release the active shipment before going offline.');
                   return;
                 }
-                setOnline((o) => !o);
+                if (!online) {
+                  setShowRouteModal(true); // Ask for Relay Route before going online
+                } else {
+                  setOnline(false); // Go offline directly
+                }
               }}
               activeOpacity={0.8}
             >
@@ -941,8 +1220,8 @@ export default function App() {
                   <>
                     <View style={styles.pulseDotSmall} />
                     <Text style={styles.collapsedText}>
-                      {jobsSorted.length > 0
-                        ? `${jobsSorted.length} shipment${jobsSorted.length === 1 ? '' : 's'} nearby`
+                      {visibleJobs.length > 0
+                        ? `${visibleJobs.length} shipment${visibleJobs.length === 1 ? '' : 's'} nearby`
                         : 'Scanning for shipments…'}
                     </Text>
                     <Text style={styles.collapsedAction}>Open</Text>
@@ -1041,6 +1320,10 @@ export default function App() {
 
                 {/* Job details */}
                 <View style={styles.summaryCard}>
+                  {/* Driver sees the Groq AR snapshot if it exists */}
+                  {activeJob.cargo_image && (
+                     <Image source={{uri: activeJob.cargo_image}} style={{width: '100%', height: 140, borderRadius: 12, marginBottom: 16, backgroundColor: C.black}} resizeMode="cover" />
+                  )}
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryIcon}>📦</Text>
                     <Text style={styles.summaryText} numberOfLines={1}>
@@ -1112,15 +1395,27 @@ export default function App() {
                         )}
                       </TouchableOpacity>
                     </View>
-                    {jobStatus === 'accepted' && (
-                      <TouchableOpacity
-                        style={styles.releaseBtn}
-                        onPress={releaseJob}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.releaseText}>Release this shipment</Text>
+                    
+                    {/* Secondary Actions Row */}
+                    {jobStatus === 'accepted' ? (
+                      <View style={{flexDirection: 'row', gap: 10, marginTop: 14}}>
+                        <TouchableOpacity style={[styles.releaseBtn, {flex: 1, marginTop: 0}]} onPress={releaseJob} activeOpacity={0.7}>
+                          <Text style={styles.releaseText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.btnOutline, {flex: 2, paddingVertical: 12, marginTop: 0}]} onPress={transferToRelay} activeOpacity={0.7}>
+                          <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>🔄 Drop at Hub</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={[styles.btnOutline, {marginTop: 14, paddingVertical: 12}]} onPress={transferToRelay} activeOpacity={0.7}>
+                        <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>🔄 Drop at Relay Hub</Text>
                       </TouchableOpacity>
                     )}
+
+                    {/* AI Pool Scanner Button */}
+                    <TouchableOpacity style={styles.poolBtn} onPress={() => setShowPoolModal(true)} activeOpacity={0.8}>
+                       <Text style={styles.poolBtnText}>📦 Have more space? Find combined deliveries</Text>
+                    </TouchableOpacity>
                   </>
                 )}
               </View>
@@ -1134,7 +1429,7 @@ export default function App() {
                 </Text>
                 <TouchableOpacity
                   style={styles.btnCta}
-                  onPress={() => setOnline(true)}
+                  onPress={() => setShowRouteModal(true)}
                   activeOpacity={0.85}
                 >
                   <Text style={styles.btnCtaText}>Go online</Text>
@@ -1153,12 +1448,12 @@ export default function App() {
                   <View style={styles.relayBadge}>
                     <View style={styles.relayDot} />
                     <Text style={styles.relayBadgeText}>
-                      {jobsSorted.length} live
+                      {visibleJobs.length} live
                     </Text>
                   </View>
                 </View>
 
-                {jobsSorted.length === 0 ? (
+                {visibleJobs.length === 0 ? (
                   <View style={styles.scanWrap}>
                     <View style={styles.pulseWrap}>
                       <Animated.View
@@ -1181,28 +1476,51 @@ export default function App() {
                     style={{ maxHeight: height * 0.4 }}
                     showsVerticalScrollIndicator={false}
                   >
-                    {jobsSorted.map((job) => {
-                      const d =
-                        coords && job.pickup_coords ? distKm(coords, job.pickup_coords) : null;
+                    {visibleJobs.map((job) => {
+                      const ageSecs = job.created_at ? Math.floor((ticker - (job.created_at?.toMillis?.() || ticker)) / 1000) : 0;
+                      const timeLeft = Math.max(0, 60 - ageSecs);
+                      const p = job.pickup_coords;
+                      const d = job.dropoff_coords;
+                      const tripDist = p && d ? distKm(p, d) : 10;
+                      const estPrice = Math.round(150 + (tripDist * 14)); // Dynamic Pricing logic
+
                       return (
                         <View key={job.id} style={styles.jobCard}>
-                          <View style={styles.jobTop}>
-                            <Text style={styles.jobItem} numberOfLines={1}>
-                              {job.item_name}
-                            </Text>
-                            {d != null && (
-                              <Text style={styles.jobDist}>~{d.toFixed(1)} km</Text>
+                          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                            {/* Driver sees cargo preview directly in the feed */}
+                            {job.cargo_image && (
+                               <Image source={{uri: job.cargo_image}} style={{width: 60, height: 60, borderRadius: 10, marginRight: 14, backgroundColor: C.black}} />
                             )}
+                            <View style={{flex: 1}}>
+                              <View style={styles.jobTop}>
+                                <Text style={styles.jobItem} numberOfLines={1}>
+                                  {job.item_name}
+                                </Text>
+                                <Text style={styles.jobPrice}>₹{estPrice}</Text>
+                              </View>
+                              <Text style={styles.jobRoute} numberOfLines={1}>
+                                {(job.pickup_name ?? 'Current location') +
+                                  '  →  ' +
+                                  job.destination_name}
+                              </Text>
+                            </View>
                           </View>
-                          <Text style={styles.jobRoute} numberOfLines={1}>
-                            {(job.pickup_name ?? 'Current location') +
-                              '  →  ' +
-                              job.destination_name}
+                          
+                          <Text style={{color: C.orange, fontSize: 12, textAlign: 'center', marginTop: 12, fontWeight: '700'}}>
+                            ⏳ {timeLeft}s remaining to accept
                           </Text>
-                          <View style={styles.jobBottom}>
-                            <Text style={styles.jobTime}>{formatDate(job.created_at)}</Text>
+
+                          <View style={[styles.jobBottom, {marginTop: 10, gap: 10}]}>
                             <TouchableOpacity
-                              style={styles.acceptBtn}
+                              style={styles.declineBtn}
+                              onPress={() => declineJob(job.id)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={styles.declineBtnText}>Decline</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.acceptBtnFlex}
                               onPress={() => acceptJob(job)}
                               disabled={!!acceptingId}
                               activeOpacity={0.85}
@@ -1246,7 +1564,7 @@ export default function App() {
                 style={[styles.btnCta, { marginTop: 24, width: 'auto', paddingHorizontal: 28 }]}
                 onPress={() => {
                   setActiveTab('home');
-                  setOnline(true);
+                  setShowRouteModal(true);
                 }}
                 activeOpacity={0.85}
               >
@@ -1262,7 +1580,20 @@ export default function App() {
               {history.map((item) => {
                 const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.accepted;
                 return (
-                  <View key={item.id} style={styles.historyCard}>
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.historyCard}
+                    activeOpacity={ACTIVE_STATUSES.includes(item.status) ? 0.7 : 1}
+                    onPress={() => {
+                      if (ACTIVE_STATUSES.includes(item.status)) {
+                         // OPTIMISTIC UI FIX: Eagerly inject the job data
+                         setActiveJob(item);
+                         setActiveJobId(item.id);
+                         setActiveTab('home');
+                         setSheetCollapsed(false);
+                      }
+                    }}
+                  >
                     <View style={styles.historyTop}>
                       <Text style={styles.historyItem} numberOfLines={1}>
                         {item.item_name}
@@ -1277,7 +1608,7 @@ export default function App() {
                       {(item.pickup_name ?? 'Pickup') + '  →  ' + item.destination_name}
                     </Text>
                     <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </ScrollView>
@@ -1522,6 +1853,18 @@ const styles = StyleSheet.create({
   },
   avatarBadgeText: { color: C.orange, fontSize: 16, fontWeight: '800' },
 
+  // ---------- AI Relay Route Modal ----------
+  routeCard: { 
+    backgroundColor: C.charcoal, 
+    borderRadius: 20, 
+    padding: 24, 
+    borderWidth: 1, 
+    borderColor: C.line,
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 30, shadowOffset: {width: 0, height: 10}, elevation: 20
+  },
+  routeTitle: { fontSize: 22, fontWeight: '800', color: C.white, marginBottom: 8 },
+  routeSub: { fontSize: 14, color: C.gray400, marginBottom: 20, lineHeight: 20 },
+
   // ---------- Bottom sheet (dark, connected to bottom) ----------
   sheetWrap: {
     position: 'absolute',
@@ -1655,14 +1998,36 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   jobItem: { color: C.white, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 10 },
+  jobPrice: { color: C.white, fontSize: 18, fontWeight: '800' },
   jobDist: { color: C.orange, fontSize: 13, fontWeight: '800' },
-  jobRoute: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 12 },
+  jobRoute: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 2 },
   jobBottom: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   jobTime: { color: C.gray500, fontSize: 12, fontWeight: '500' },
+  
+  declineBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: C.gray700,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 12,
+    flex: 1,
+    alignItems: 'center',
+  },
+  declineBtnText: { color: C.gray400, fontSize: 14, fontWeight: '700' },
+  acceptBtnFlex: {
+    backgroundColor: C.orange,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 12,
+    flex: 1.5,
+    alignItems: 'center',
+  },
+  
   acceptBtn: {
     backgroundColor: C.orange,
     paddingHorizontal: 22,
@@ -1840,9 +2205,20 @@ const styles = StyleSheet.create({
   releaseBtn: { alignItems: 'center', marginTop: 14 },
   releaseText: { color: C.gray500, fontSize: 13, fontWeight: '600' },
 
+  poolBtn: {
+    backgroundColor: 'rgba(249,115,22,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.4)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  poolBtnText: { color: C.orange, fontSize: 13, fontWeight: '700' },
+
   // ---------- Activity / Profile screens ----------
   screen: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: C.black,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 68 : 52,

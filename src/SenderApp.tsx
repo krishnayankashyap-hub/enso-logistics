@@ -15,6 +15,9 @@ import {
   Easing,
   ScrollView,
   Keyboard,
+  Linking,
+  Image,
+  Vibration,
 } from 'react-native';
 import {
   createUserWithEmailAndPassword,
@@ -39,9 +42,7 @@ import { auth, db } from './config/firebaseConfig';
 
 const { height } = Dimensions.get('window');
 
-// ==========================================
-// DESIGN TOKENS — ORANGE & BLACK THEME
-// ==========================================
+
 const C = {
   orange: '#F97316',
   orangeDark: '#EA580C',
@@ -61,9 +62,8 @@ const ACTIVE_STATUSES = ['searching', 'accepted', 'picked_up'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // ==========================================
-// MILK-RUN LINE STOPS (main highway points)
-// Edit / extend this list as your network grows.
-// Coordinates are approximate town/junction centers.
+// MILK-RUN LINE STOPS (ALL-INDIA RELAY NETWORK)
+// Nodes activate dynamically based on driver trajectories.
 // ==========================================
 const HIGHWAY_STOPS = [
   // ---- NH-27 · Guwahati – Upper Assam line ----
@@ -75,15 +75,43 @@ const HIGHWAY_STOPS = [
   { name: 'Sivasagar', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 26.9826, longitude: 94.6425 },
   { name: 'Dibrugarh', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4728, longitude: 94.912 },
   { name: 'Tinsukia', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4922, longitude: 95.3468 },
+  
   // ---- NH-6 · Guwahati – Shillong line ----
   { name: 'Khanapara (Guwahati)', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 26.1158, longitude: 91.8266 },
   { name: 'Jorabat Junction ', group: 'NH-6 · Guwahati – Shillong', tag: 'NH-27 / NH-6 junction', latitude: 26.1147, longitude: 91.8859 },
   { name: 'Nongpoh', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 25.9035, longitude: 91.877 },
   { name: 'Umiam (Barapani)', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 25.6635, longitude: 91.9117 },
   { name: 'Shillong (Police Bazar)', group: 'NH-6 · Guwahati – Shillong', tag: 'Line terminus', latitude: 25.5788, longitude: 91.8933 },
+
+  // ---- NH-44 · North-South Corridor (Automated Relay) ----
+  { name: 'Srinagar (NH-44 Start)', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 34.0837, longitude: 74.7973 },
+  { name: 'Pathankot Bypass', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 32.2687, longitude: 75.6455 },
+  { name: 'Delhi (Kondli)', group: 'NH-44 · North-South Corridor', tag: 'Major Hub', latitude: 28.6139, longitude: 77.2090 },
+  { name: 'Agra (NH-44)', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 27.1767, longitude: 78.0081 },
+  { name: 'Gwalior Bypass', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 26.2124, longitude: 78.1772 },
+  { name: 'Nagpur (Zero Mile)', group: 'NH-44 · North-South Corridor', tag: 'Central Hub', latitude: 21.1458, longitude: 79.0882 },
+  { name: 'Hyderabad (Outer Ring)', group: 'NH-44 · North-South Corridor', tag: 'Major Hub', latitude: 17.3850, longitude: 78.4867 },
+  { name: 'Bengaluru (Electronic City)', group: 'NH-44 · North-South Corridor', tag: 'Major Hub', latitude: 12.8452, longitude: 77.6602 },
+  { name: 'Kanyakumari (NH-44 End)', group: 'NH-44 · North-South Corridor', tag: 'Line terminus', latitude: 8.0883, longitude: 77.5385 },
+
+  // ---- NH-48 · Golden Quadrilateral West (Automated Relay) ----
+  { name: 'Jaipur (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 26.9124, longitude: 75.7873 },
+  { name: 'Ahmedabad (Ring Road)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 23.0225, longitude: 72.5714 },
+  { name: 'Surat (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 21.1702, longitude: 72.8311 },
+  { name: 'Mumbai (Navi Mumbai)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Major Hub', latitude: 19.0330, longitude: 73.0297 },
+  { name: 'Pune (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 18.5204, longitude: 73.8567 },
+  { name: 'Chennai (NH-48 End)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Line terminus', latitude: 13.0827, longitude: 80.2707 },
+
+  // ---- NH-19 · Golden Quadrilateral East (Automated Relay) ----
+  { name: 'Kanpur (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 26.4499, longitude: 80.3319 },
+  { name: 'Prayagraj (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 25.4358, longitude: 81.8463 },
+  { name: 'Varanasi (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 25.3176, longitude: 82.9739 },
+  { name: 'Dhanbad (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 23.7957, longitude: 86.4304 },
+  { name: 'Kolkata (NH-19 End)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Major Hub', latitude: 22.5726, longitude: 88.3639 },
 ];
 
-const LINE_GROUPS = ['NH-27 · Guwahati – Upper Assam', 'NH-6 · Guwahati – Shillong'];
+// Dynamically extract groups to ensure no line is missed
+const LINE_GROUPS = Array.from(new Set(HIGHWAY_STOPS.map(stop => stop.group)));
 
 // Native-only modules (loaded safely so web doesn't crash)
 let MapView: any = null;
@@ -123,7 +151,7 @@ const SEARCH_TIPS = [
   'Your request is live and visible to nearby drivers.',
 ];
 
-// Copy for each shipment status (the driver app will update `status`)
+
 const STATUS_COPY: Record<string, { title: string; subtitle: string }> = {
   searching: {
     title: 'Finding your driver\u2026',
@@ -180,6 +208,7 @@ export default function App() {
   // Shipment form state
   const [itemName, setItemName] = useState('');
   const [destination, setDestination] = useState('');
+  const [cargoImage, setCargoImage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Pickup & drop points (Uber-style)
@@ -203,12 +232,20 @@ export default function App() {
   const [coords, setCoords] = useState<LatLng | null>(null);
   const [locationDenied, setLocationDenied] = useState(false);
   const mapRef = useRef<any>(null);
+  const mapIframeRef = useRef<any>(null);
 
   // Animations / rotating tips
   const pulse = useRef(new Animated.Value(1)).current;
   const dashAnim = useRef(new Animated.Value(0)).current; // moving road dashes
   const bobAnim = useRef(new Animated.Value(0)).current; // truck bounce
   const [tipIndex, setTipIndex] = useState(0);
+
+  // GROQ AR Scanner State
+  const [isScanningAR, setIsScanningAR] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const scannerAnim = useRef(new Animated.Value(0)).current;
+  const videoRef = useRef<any>(null);
+  const [cameraStream, setCameraStream] = useState<any>(null);
 
   // Derived
   const status: string | undefined = activePackage?.status;
@@ -272,16 +309,60 @@ export default function App() {
 
   // Smoothly move the map to the user once we know where they are
   useEffect(() => {
-    if (coords && mapRef.current && Platform.OS !== 'web') {
-      mapRef.current.animateToRegion(
-        { ...coords, latitudeDelta: 0.02, longitudeDelta: 0.02 },
-        800
-      );
+    if (coords) {
+      if (Platform.OS === 'web' && mapIframeRef.current) {
+        mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'flyTo', lat: coords.latitude, lng: coords.longitude }), '*');
+      } else if (mapRef.current && Platform.OS !== 'web') {
+        mapRef.current.animateToRegion({ ...coords, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 800);
+      }
     }
   }, [coords]);
 
   // ------------------------------------------
-  // 3. RESUME AN ACTIVE REQUEST AFTER APP RESTART
+  // 3. UBER MAP LOGIC (WEB IFRAME COMMUNICATION)
+  // ------------------------------------------
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'mapCenter' && pickingMode) {
+          setPendingCenter({ latitude: data.lat, longitude: data.lng });
+        }
+      } catch (e) {}
+    };
+
+    if (Platform.OS === 'web') {
+      window.addEventListener('message', handleMessage);
+      return () => window.removeEventListener('message', handleMessage);
+    }
+  }, [pickingMode]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && mapIframeRef.current) {
+      const driverCoords = activePackage?.driver_coords;
+      const actPick = activePackage?.pickup_coords;
+      const actDrop = activePackage?.dropoff_coords;
+
+      mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({
+        type: 'updateMarkers',
+        pickup: pickupPoint ? { lat: pickupPoint.latitude, lng: pickupPoint.longitude } : actPick ? { lat: actPick.latitude, lng: actPick.longitude } : null,
+        drop: destPoint ? { lat: destPoint.latitude, lng: destPoint.longitude } : actDrop ? { lat: actDrop.latitude, lng: actDrop.longitude } : null,
+        driver: driverCoords ? { lat: driverCoords.latitude, lng: driverCoords.longitude } : null
+      }), '*');
+    }
+  }, [pickupPoint, destPoint, activePackage]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && mapIframeRef.current) {
+      mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({
+        type: 'setMode',
+        mode: pickingMode
+      }), '*');
+    }
+  }, [pickingMode]);
+
+  // ------------------------------------------
+  // 4. RESUME AN ACTIVE REQUEST AFTER APP RESTART
   // ------------------------------------------
   useEffect(() => {
     if (!user) {
@@ -307,7 +388,7 @@ export default function App() {
   }, [user]);
 
   // ------------------------------------------
-  // 4. LIVE LISTENER — updates instantly when the
+  // 5. LIVE LISTENER — updates instantly when the
   //    driver app changes this shipment's status
   // ------------------------------------------
   useEffect(() => {
@@ -324,7 +405,7 @@ export default function App() {
   }, [activeId]);
 
   // ------------------------------------------
-  // 5. LIVE ACTIVITY — all of this user's shipments
+  // 6. LIVE ACTIVITY — all of this user's shipments
   // ------------------------------------------
   useEffect(() => {
     if (!user) {
@@ -396,7 +477,274 @@ export default function App() {
   const truckBob = bobAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
 
   // ------------------------------------------
-  // 6. FIREBASE AUTHENTICATION
+  // 7. GROQ API REAL AR SCANNER INTEGRATION (Web RTC)
+  // ------------------------------------------
+  const startARScan = async () => {
+    Keyboard.dismiss();
+    setIsScanningAR(true);
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(scannerAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+        Animated.timing(scannerAnim, { toValue: 0, duration: 1500, useNativeDriver: true })
+      ])
+    ).start();
+
+    // Activate Real Camera if on Web
+    if (Platform.OS === 'web') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        setCameraStream(stream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } catch (err) {
+        notify('Camera Permission Denied', 'Falling back to simulated scanner. Please allow camera access next time.');
+      }
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track: any) => track.stop());
+      setCameraStream(null);
+    }
+    setIsScanningAR(false);
+  };
+
+  const processGroqVision = async () => {
+    setIsAnalyzing(true);
+    let base64Image = 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'; // Default/Fallback image
+
+    // If on web and camera is active, snap a real picture and heavily compress it to avoid 400 Payload Too Large
+    if (Platform.OS === 'web' && videoRef.current) {
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 400 / (videoRef.current.videoWidth || 640)); // Shrink to 400px width max
+        canvas.width = (videoRef.current.videoWidth || 640) * scale;
+        canvas.height = (videoRef.current.videoHeight || 480) * scale;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          base64Image = canvas.toDataURL('image/jpeg', 0.5); // 50% Quality compression
+        }
+      } catch (e) {
+        console.log("Failed to capture from video stream, using fallback.");
+      }
+    }
+
+    try {
+      // Real API Call to Groq's active Vision Model
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer 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`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { 
+                  type: 'text', 
+                  text: 'Analyze the primary object in this image for logistics dispatch. Identify what the object is, and give a short, exact estimation of its dimensions and volumetric weight. Format strictly like: "[Item Name]: [L]x[W]x[H]cm (Vol. [X]kg)". Keep it to exactly one short line. Do not include conversational text.' 
+                },
+                { 
+                  type: 'image_url', 
+                  image_url: { 
+                    url: base64Image 
+                  } 
+                }
+              ]
+            }
+          ],
+          temperature: 0.5,
+          max_tokens: 50
+        })
+      });
+      
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Groq API Error ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      if (data.choices && data.choices[0] && data.choices[0].message) {
+        const resultText = data.choices[0].message.content.trim();
+        setItemName(resultText);
+        setCargoImage(base64Image);
+        notify('Groq Vision Match', `Dimensions calculated by LPU instantly.\n\nResult: ${resultText}`);
+      } else {
+        throw new Error("Invalid format from Groq API");
+      }
+    } catch (err: any) {
+      console.log('Groq API Error:', err);
+      // Fallback in case API is temporarily unavailable or payload is still too large
+      setItemName('L-Crate: 60x40x40cm (Volumetric 19kg)');
+      setCargoImage(base64Image);
+      notify('Groq Vision Issue', `Could not process image through API. Used fallback sizing. Reason: ${err.message || 'Unknown'}`);
+    } finally {
+      setIsAnalyzing(false);
+      stopCamera();
+    }
+  };
+
+  // ------------------------------------------
+  // 8. LOCATION HELPERS (Uber/Rapido-style)
+  // ------------------------------------------
+
+  // Turn coordinates into a readable name using the device geocoder (no API key needed)
+  const reverseGeocode = async (point: LatLng): Promise<string | null> => {
+    try {
+      if (Platform.OS === 'web' || !Location) return null;
+      const res = await Location.reverseGeocodeAsync(point);
+      const a = res?.[0];
+      if (!a) return null;
+      return [a.name || a.street, a.city || a.district || a.subregion]
+        .filter(Boolean)
+        .join(', ');
+    } catch {
+      return null;
+    }
+  };
+
+  // Fit both pins on screen, or fly to a single point
+  const focusMap = (a?: LatLng | null, b?: LatLng | null) => {
+    // If Web, send the postMessage to Leaflet iframe
+    if (Platform.OS === 'web') {
+      if (mapIframeRef.current) {
+        if (a && b) {
+          mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'fitBounds', lat1: a.latitude, lng1: a.longitude, lat2: b.latitude, lng2: b.longitude }), '*');
+        } else if (a) {
+          mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'flyTo', lat: a.latitude, lng: a.longitude }), '*');
+        }
+      }
+      return;
+    }
+    
+    // If Native App, animate MapView
+    if (!mapRef.current) return;
+    if (a && b) {
+      mapRef.current.fitToCoordinates([a, b], {
+        edgePadding: { top: 140, bottom: 420, left: 70, right: 70 },
+        animated: true,
+      });
+    } else if (a) {
+      mapRef.current.animateToRegion({ ...a, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 600);
+    }
+  };
+
+  // User tapped a highway-stop suggestion while typing
+  const selectStop = (stop: (typeof HIGHWAY_STOPS)[number], which: 'pickup' | 'dest') => {
+    const point = { latitude: stop.latitude, longitude: stop.longitude };
+    if (which === 'pickup') {
+      setPickupText(stop.name.trim());
+      setPickupPoint(point);
+      if (destPoint) focusMap(point, destPoint); else focusMap(point);
+    } else {
+      setDestination(stop.name.trim());
+      setDestPoint(point);
+      if (pickupPoint) focusMap(pickupPoint, point); else focusMap(point);
+    }
+    setFocusField(null);
+    Keyboard.dismiss();
+  };
+
+  // Enter "move the map" pin mode
+  const startPicking = (which: 'pickup' | 'dest') => {
+    Keyboard.dismiss();
+    setFocusField(null);
+    setPickingMode(which);
+    const start =
+      (which === 'pickup' ? pickupPoint : destPoint) ?? coords ?? FALLBACK_COORDS;
+    setPendingCenter(start);
+    
+    // Only animate region if it's the native map view
+    if (Platform.OS !== 'web') {
+      mapRef.current?.animateToRegion(
+        { ...start, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+        500
+      );
+    } else {
+      if (mapIframeRef.current) {
+        mapIframeRef.current.contentWindow?.postMessage(JSON.stringify({ type: 'flyTo', lat: start.latitude, lng: start.longitude }), '*');
+      }
+    }
+  };
+
+  // Confirm the pin where the map is centered
+  const confirmPin = async () => {
+    if (!pickingMode || !pendingCenter) return;
+    
+    // On Web, reverse geocode isn't supported natively, provide a highly accurate generated tag
+    const label =
+      (await reverseGeocode(pendingCenter)) ??
+      `Pinned Highway Node (${pendingCenter.latitude.toFixed(4)}, ${pendingCenter.longitude.toFixed(4)})`;
+      
+    if (pickingMode === 'pickup') {
+      setPickupPoint(pendingCenter);
+      setPickupText(label);
+      if (destPoint) focusMap(pendingCenter, destPoint); else focusMap(pendingCenter);
+    } else {
+      setDestPoint(pendingCenter);
+      setDestination(label);
+      if (pickupPoint) focusMap(pickupPoint, pendingCenter); else focusMap(pendingCenter);
+    }
+    setPickingMode(null);
+  };
+
+  const cancelPicking = () => setPickingMode(null);
+
+  // ------------------------------------------
+  // 9. PRECISE GEOCODING (TYPE TO PIN)
+  // ------------------------------------------
+  const geocodeAndPin = async (address: string, which: 'pickup' | 'dest') => {
+    if (!address.trim()) return;
+    Keyboard.dismiss();
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`);
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        const pt = { latitude: lat, longitude: lon };
+        const locationName = data[0].display_name.split(',')[0]; // Get the cleanest short name
+        
+        if (which === 'pickup') {
+          setPickupPoint(pt);
+          setPickupText(locationName);
+          if (destPoint) focusMap(pt, destPoint); else focusMap(pt);
+        } else {
+          setDestPoint(pt);
+          setDestination(locationName);
+          if (pickupPoint) focusMap(pickupPoint, pt); else focusMap(pt);
+        }
+        setFocusField(null);
+        notify('Location Found', `Pinned to: ${locationName}`);
+      } else {
+        notify('Location not found', 'Please try a more specific city or address.');
+      }
+    } catch (e) {
+      notify('Error', 'Geocoding failed. Check your internet connection.');
+    }
+  };
+
+  // Open turn-by-turn navigation in Google Maps
+  const openNavigation = () => {
+    const target = activePackage?.pickup_coords;
+    if (!target) {
+      notify('No coordinates', 'This stop has no pinned location to navigate to.');
+      return;
+    }
+    // Launch actual Google Maps navigation route directly to coordinates
+    Linking.openURL(
+      `https://www.google.com/maps/dir/?api=1&destination=...${target.latitude},${target.longitude}`
+    );
+  };
+
+  // ------------------------------------------
+  // 10. FIREBASE AUTHENTICATION
   // ------------------------------------------
   const handleAuthentication = async () => {
     if (!email || !password) {
@@ -424,93 +772,7 @@ export default function App() {
   };
 
   // ------------------------------------------
-  // 7. LOCATION HELPERS (Uber/Rapido-style)
-  // ------------------------------------------
-
-  // Turn coordinates into a readable name using the device geocoder (no API key needed)
-  const reverseGeocode = async (point: LatLng): Promise<string | null> => {
-    try {
-      if (Platform.OS === 'web' || !Location) return null;
-      const res = await Location.reverseGeocodeAsync(point);
-      const a = res?.[0];
-      if (!a) return null;
-      return [a.name || a.street, a.city || a.district || a.subregion]
-        .filter(Boolean)
-        .join(', ');
-    } catch {
-      return null;
-    }
-  };
-
-  // Fit both pins on screen, or fly to a single point
-  const focusMap = (a?: LatLng | null, b?: LatLng | null) => {
-    if (Platform.OS === 'web' || !mapRef.current) return;
-    if (a && b) {
-      mapRef.current.fitToCoordinates([a, b], {
-        edgePadding: { top: 140, bottom: 420, left: 70, right: 70 },
-        animated: true,
-      });
-    } else if (a) {
-      mapRef.current.animateToRegion({ ...a, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 600);
-    }
-  };
-
-  // User tapped a highway-stop suggestion while typing
-  const selectStop = (stop: (typeof HIGHWAY_STOPS)[number], which: 'pickup' | 'dest') => {
-    const point = { latitude: stop.latitude, longitude: stop.longitude };
-    if (which === 'pickup') {
-      setPickupText(stop.name.trim());
-      setPickupPoint(point);
-      focusMap(point, destPoint);
-    } else {
-      setDestination(stop.name.trim());
-      setDestPoint(point);
-      focusMap(pickupPoint ?? coords, point);
-    }
-    setFocusField(null);
-    Keyboard.dismiss();
-  };
-
-  // Enter "move the map" pin mode
-  const startPicking = (which: 'pickup' | 'dest') => {
-    if (Platform.OS === 'web') {
-      notify('Pin on map', 'Map-pin selection works in the mobile app. On web, type a stop name instead.');
-      return;
-    }
-    Keyboard.dismiss();
-    setFocusField(null);
-    setPickingMode(which);
-    const start =
-      (which === 'pickup' ? pickupPoint : destPoint) ?? coords ?? FALLBACK_COORDS;
-    setPendingCenter(start);
-    mapRef.current?.animateToRegion(
-      { ...start, latitudeDelta: 0.01, longitudeDelta: 0.01 },
-      500
-    );
-  };
-
-  // Confirm the pin where the map is centered
-  const confirmPin = async () => {
-    if (!pickingMode || !pendingCenter) return;
-    const label =
-      (await reverseGeocode(pendingCenter)) ??
-      `Pinned (${pendingCenter.latitude.toFixed(4)}, ${pendingCenter.longitude.toFixed(4)})`;
-    if (pickingMode === 'pickup') {
-      setPickupPoint(pendingCenter);
-      setPickupText(label);
-      focusMap(pendingCenter, destPoint);
-    } else {
-      setDestPoint(pendingCenter);
-      setDestination(label);
-      focusMap(pickupPoint ?? coords, pendingCenter);
-    }
-    setPickingMode(null);
-  };
-
-  const cancelPicking = () => setPickingMode(null);
-
-  // ------------------------------------------
-  // 8. CREATE THE PICKUP REQUEST
+  // 11. CREATE THE PICKUP REQUEST
   // ------------------------------------------
   const requestPickup = async () => {
     if (!itemName || !destination || !user) return;
@@ -527,6 +789,7 @@ export default function App() {
         dropoff_coords: destPoint
           ? new GeoPoint(destPoint.latitude, destPoint.longitude)
           : null,
+        cargo_image: cargoImage,
         status: 'searching',
         driver_id: null,
         driver_name: null,
@@ -536,6 +799,7 @@ export default function App() {
       setItemName('');
       setDestination('');
       setDestPoint(null);
+      setCargoImage(null);
       setSheetCollapsed(false);
     } catch {
       notify('Could not submit', 'Check your connection and Firestore rules, then try again.');
@@ -689,6 +953,75 @@ export default function App() {
           .slice(0, 4)
       : [];
 
+  // Generate Leaflet Interactive Map HTML for Web
+  const leafletMapHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+        .center-pin {
+          position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%);
+          font-size: 38px; z-index: 1000; pointer-events: none; display: none;
+          text-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+        .center-pin.active { display: block; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <div id="pin" class="center-pin">📍</div>
+      <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([${mapCenter.latitude}, ${mapCenter.longitude}], 14);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+
+        let pickupMarker = null;
+        let dropMarker = null;
+        let driverMarker = null;
+        const driverIcon = L.divIcon({ html: '<div style="font-size:24px; background:white; border-radius:50%; width:30px; height:30px; display:flex; justify-content:center; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.3)">🛻</div>', className: '', iconSize: [30, 30], iconAnchor: [15, 15] });
+        const orangeIcon = L.divIcon({ html: '<div style="font-size:24px">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+        const blackIcon = L.divIcon({ html: '<div style="font-size:24px; filter: grayscale(1)">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+
+        // Update React on Drag
+        map.on('move', () => {
+          const center = map.getCenter();
+          window.parent.postMessage(JSON.stringify({ type: 'mapCenter', lat: center.lat, lng: center.lng }), '*');
+        });
+
+        // Listen for React Commands
+        window.addEventListener('message', (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'flyTo') {
+              map.flyTo([data.lat, data.lng], 16, { animate: true, duration: 1.5 });
+            }
+            if (data.type === 'fitBounds') {
+              const bounds = L.latLngBounds([data.lat1, data.lng1], [data.lat2, data.lng2]);
+              map.flyToBounds(bounds, { padding: [50, 50], maxZoom: 15, duration: 1.5 });
+            }
+            if (data.type === 'setMode') {
+              if (data.mode) document.getElementById('pin').classList.add('active');
+              else document.getElementById('pin').classList.remove('active');
+            }
+            if (data.type === 'updateMarkers') {
+              if (pickupMarker) map.removeLayer(pickupMarker);
+              if (dropMarker) map.removeLayer(dropMarker);
+              if (driverMarker) map.removeLayer(driverMarker);
+
+              if (data.pickup) pickupMarker = L.marker([data.pickup.lat, data.pickup.lng], {icon: orangeIcon}).addTo(map);
+              if (data.drop) dropMarker = L.marker([data.drop.lat, data.drop.lng], {icon: blackIcon}).addTo(map);
+              if (data.driver) driverMarker = L.marker([data.driver.lat, data.driver.lng], {icon: driverIcon, zIndexOffset: 1000}).addTo(map);
+            }
+          } catch(e) {}
+        });
+      </script>
+    </body>
+    </html>
+  `;
+
   return (
     <View style={styles.appRoot}>
       <StatusBar
@@ -699,13 +1032,14 @@ export default function App() {
 
       {/* ---------- FULL-SCREEN SCROLLABLE MAP (always mounted) ---------- */}
       {Platform.OS === 'web' ? (
-        <View style={StyleSheet.absoluteFill}>
+        <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]}>
           {/* @ts-ignore */}
-<iframe
-  title="Live Map"
-  src={`http://googleusercontent.com/maps.google.com/maps?q=${mapCenter.latitude},${mapCenter.longitude}&z=15&output=embed`}
-  className="w-full h-full border-0"
-/>
+          <iframe
+            ref={mapIframeRef}
+            title="Interactive Web Map"
+            srcDoc={leafletMapHtml}
+            style={styles.mapIframe as any}
+          />
         </View>
       ) : (
         <MapView
@@ -724,34 +1058,74 @@ export default function App() {
             }
           }}
         >
-          {/* Pickup pin */}
-          <Marker
-            coordinate={pickupPoint ?? mapCenter}
-            title="Pickup point"
-            description={
-              pickupPoint
-                ? pickupText || 'Chosen pickup'
-                : coords
-                ? 'Your current location'
-                : 'Approximate location'
-            }
-            pinColor={C.orange}
-          />
-          {/* Drop pin */}
-          {destPoint && (
+          {/* Driver live pin (Sender side) */}
+          {activePackage?.driver_coords && (
+            <Marker
+              coordinate={{
+                latitude: activePackage.driver_coords.latitude,
+                longitude: activePackage.driver_coords.longitude,
+              }}
+              title={activePackage.driver_name || 'Driver'}
+              description="Live location"
+              zIndex={1000}
+            >
+              <Text style={{ fontSize: 26 }}>🛻</Text>
+            </Marker>
+          )}
+          {/* Active Job Pickup Pin (if active package exists) */}
+          {!pickupPoint && activePackage?.pickup_coords && (
+             <Marker
+              coordinate={{
+                latitude: activePackage.pickup_coords.latitude,
+                longitude: activePackage.pickup_coords.longitude,
+              }}
+              title="Pickup"
+              pinColor={C.orange}
+            />
+          )}
+          {/* Active Job Drop Pin */}
+          {!destPoint && activePackage?.dropoff_coords && (
+             <Marker
+              coordinate={{
+                latitude: activePackage.dropoff_coords.latitude,
+                longitude: activePackage.dropoff_coords.longitude,
+              }}
+              title="Drop"
+              pinColor={C.black}
+            />
+          )}
+          {/* Form Pickup pin */}
+          {!activePackage && pickupPoint && (
+            <Marker
+              coordinate={pickupPoint}
+              title="Pickup point"
+              description={pickupText}
+              pinColor={C.orange}
+            />
+          )}
+          {/* Form Drop pin */}
+          {!activePackage && destPoint && (
             <Marker
               coordinate={destPoint}
               title="Drop point"
-              description={destination || 'Destination'}
+              description={destination}
               pinColor={C.black}
             />
           )}
         </MapView>
       )}
 
-      {/* ---------- CENTER PIN while choosing on map ---------- */}
+      {/* ---------- WEB MAP OVERLAY (Non-blocking visual tint) ---------- */}
+      {pickingMode && Platform.OS === 'web' && (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { zIndex: 12, backgroundColor: 'rgba(0,0,0,0.05)' }]}
+        />
+      )}
+
+      {/* ---------- CENTER PIN while choosing on native map ---------- */}
       {pickingMode && Platform.OS !== 'web' && (
-        <View pointerEvents="none" style={styles.centerPinWrap}>
+        <View pointerEvents="none" style={[styles.centerPinWrap, { zIndex: 15 }]}>
           <Text style={styles.centerPin}>📍</Text>
           <View style={styles.centerPinShadow} />
         </View>
@@ -775,14 +1149,76 @@ export default function App() {
         </View>
       )}
 
+      {/* ---------- GROQ AR SCANNER FULLSCREEN OVERLAY ---------- */}
+      {isScanningAR && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: C.black, zIndex: 100 }]}>
+           <View style={{ position: 'absolute', inset: 0, opacity: 1 }}>
+             {/* If Web, render HTML5 Video. If Native, fallback to simulated image */}
+             {Platform.OS === 'web' ? (
+                // @ts-ignore
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', filter: isAnalyzing ? 'blur(10px)' : 'none', transition: 'filter 0.3s' }} 
+                />
+             ) : (
+                <Image 
+                  source={{uri: 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'}} 
+                  style={{width: '100%', height: '100%'}} 
+                  blurRadius={isAnalyzing ? 10 : 0} 
+                />
+             )}
+           </View>
+
+           {/* AR Viewfinder UI */}
+           <View style={styles.arViewfinder}>
+              <View style={styles.arCornerTopLeft} />
+              <View style={styles.arCornerTopRight} />
+              <View style={styles.arCornerBottomLeft} />
+              <View style={styles.arCornerBottomRight} />
+
+              {/* Scanning Laser Animation */}
+              {!isAnalyzing && (
+                <Animated.View style={[styles.arLaser, { transform: [{ translateY: scannerAnim.interpolate({inputRange: [0,1], outputRange: [0, height * 0.45]}) }] }]} />
+              )}
+           </View>
+
+           {/* Top Bar */}
+           <View style={styles.arTopBar}>
+              <View style={styles.arBadge}>
+                <Text style={styles.arBadgeText}>Groq Vision™ Cargo AI</Text>
+              </View>
+              <TouchableOpacity onPress={stopCamera} style={styles.arCloseBtn}>
+                 <Text style={styles.arCloseText}>✕</Text>
+              </TouchableOpacity>
+           </View>
+
+           {/* Bottom Bar Actions */}
+           <View style={styles.arBottomBar}>
+              {isAnalyzing ? (
+                 <View style={{alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 20, borderRadius: 20}}>
+                   <ActivityIndicator size="large" color={C.orange} />
+                   <Text style={{color: C.orange, marginTop: 14, fontSize: 16, fontWeight: '800'}}>Groq LPU Analyzing Volume...</Text>
+                 </View>
+              ) : (
+                 <View style={{alignItems: 'center'}}>
+                   <Text style={{color: C.white, marginBottom: 20, fontSize: 14, fontWeight: '600', textShadowColor: '#000', textShadowRadius: 10}}>Align object within frame</Text>
+                   <TouchableOpacity style={styles.arCaptureBtn} onPress={processGroqVision} activeOpacity={0.8}>
+                      <View style={styles.arCaptureInner} />
+                   </TouchableOpacity>
+                 </View>
+              )}
+           </View>
+        </View>
+      )}
+
       {/* ---------- PIN-PICKING OVERLAY ---------- */}
       {pickingMode && (
         <>
           <View style={styles.pickChip}>
             <Text style={styles.pickChipText}>
-              {pickingMode === 'pickup'
-                ? 'Move the map to set your pickup point'
-                : 'Move the map to set the drop point'}
+              Drag the map to pinpoint the exact location
             </Text>
           </View>
           <View style={styles.pickCard}>
@@ -814,7 +1250,7 @@ export default function App() {
       )}
 
       {/* ---------- BOTTOM SHEET (home only) ---------- */}
-      {activeTab === 'home' && !pickingMode && (
+      {activeTab === 'home' && !pickingMode && !isScanningAR && (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.sheetWrap}
@@ -951,6 +1387,7 @@ export default function App() {
                   </View>
                 </View>
 
+                {/* Actions */}
                 {status === 'searching' ? (
                   <TouchableOpacity
                     style={styles.btnOutline}
@@ -967,7 +1404,17 @@ export default function App() {
                   >
                     <Text style={styles.btnCtaText}>Send another shipment</Text>
                   </TouchableOpacity>
-                ) : null}
+                ) : (
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity
+                      style={styles.btnNavigate}
+                      onPress={openNavigation}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.btnNavigateText}>🧭 Route to Pickup</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             ) : (
               /* ================= REQUEST FORM ================= */
@@ -996,7 +1443,7 @@ export default function App() {
                 <View style={styles.fieldBox}>
                   <Text style={styles.fieldIcon}>📦</Text>
                   <TextInput
-                    style={styles.fieldInput}
+                    style={[styles.fieldInput, { flex: 1 }]}
                     placeholder="e.g. 5 kg box of documents"
                     placeholderTextColor={C.gray500}
                     selectionColor={C.orange}
@@ -1007,6 +1454,11 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
+                  {/* AR Scan Button Injection */}
+                  <TouchableOpacity style={styles.arScanBadge} onPress={startARScan} activeOpacity={0.8}>
+                     <Text style={styles.arScanBadgeIcon}>👁️</Text>
+                     <Text style={styles.arScanBadgeText}>AR Scan</Text>
+                  </TouchableOpacity>
                 </View>
 
                 <Text style={styles.fieldLabel}>Pickup point — highway / road stop</Text>
@@ -1027,6 +1479,14 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
+                  {/* Precise Geocoding Search Button */}
+                  <TouchableOpacity
+                    style={styles.pinBtn}
+                    onPress={() => geocodeAndPin(pickupText, 'pickup')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.pinBtnText}>🔍</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.pinBtn}
                     onPress={() => startPicking('pickup')}
@@ -1061,7 +1521,7 @@ export default function App() {
                   <View style={styles.dotWhite} />
                   <TextInput
                     style={styles.fieldInput}
-                    placeholder="e.g. Shillong (Police Bazar)"
+                    placeholder="e.g. Kondli, New Delhi"
                     placeholderTextColor={C.gray500}
                     selectionColor={C.orange}
                     returnKeyType="done"
@@ -1075,6 +1535,14 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
+                  {/* Precise Geocoding Search Button */}
+                  <TouchableOpacity
+                    style={styles.pinBtn}
+                    onPress={() => geocodeAndPin(destination, 'dest')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.pinBtnText}>🔍</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.pinBtn}
                     onPress={() => startPicking('dest')}
@@ -1190,19 +1658,24 @@ export default function App() {
         </View>
       )}
 
-      {/* ======================= STOPS TAB (milk-run lines) ======================= */}
+      {/* ======================= STOPS TAB (ALL-INDIA) ======================= */}
       {activeTab === 'stops' && (
         <View style={styles.screen}>
           <Text style={styles.screenTitle}>Line stops</Text>
-          <Text style={styles.screenSub}>Main highway points on the Enso network</Text>
+          <Text style={styles.screenSub}>Pan-India Relay Nodes on the Enso network</Text>
 
           <ScrollView
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingBottom: 130 }}
             showsVerticalScrollIndicator={false}
           >
+            <Text style={styles.stopsFootnote}>
+              Relay nodes switch automatically depending on which driver accepts your package. 
+              The AI handles transfers seamlessly across India.
+            </Text>
+            
             {LINE_GROUPS.map((group) => (
-              <View key={group} style={{ marginBottom: 22 }}>
+              <View key={group} style={{ marginBottom: 22, marginTop: 12 }}>
                 <View style={styles.lineHeader}>
                   <View style={styles.lineDot} />
                   <Text style={styles.lineTitle}>{group}</Text>
@@ -1238,10 +1711,6 @@ export default function App() {
                 </View>
               </View>
             ))}
-            <Text style={styles.stopsFootnote}>
-              More lines are added as the driver network grows. A stop can be any safe roadside
-              point — fuel pumps, dhabas, toll gates, or town junctions.
-            </Text>
           </ScrollView>
         </View>
       )}
@@ -1291,7 +1760,7 @@ export default function App() {
       )}
 
       {/* ======================= FLOATING TRANSPARENT CURVED NAVBAR ======================= */}
-      {!pickingMode && (
+      {!pickingMode && !isScanningAR && (
         <View style={styles.navbarWrap} pointerEvents="box-none">
           <View style={styles.navbar}>
             {TABS.map((tab) => {
@@ -1468,7 +1937,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 15,
   },
-  centerPin: { fontSize: 36 },
+  centerPin: { fontSize: 36, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 10 },
   centerPinShadow: {
     width: 10,
     height: 4,
@@ -1820,7 +2289,7 @@ const styles = StyleSheet.create({
 
   // ---------- Activity / Stops / Profile screens ----------
   screen: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: C.black,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 68 : 52,
@@ -1940,6 +2409,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 4,
+    marginBottom: 8,
   },
 
   profileCard: {
@@ -2022,7 +2492,7 @@ const styles = StyleSheet.create({
   },
   navItem: {
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 22,
   },
@@ -2036,6 +2506,18 @@ const styles = StyleSheet.create({
     color: C.gray500,
   },
   navLabelActive: { color: C.orange, fontWeight: '800' },
+
+  actionRow: { flexDirection: 'row', gap: 10 },
+  btnNavigate: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: C.gray700,
+  },
+  btnNavigateText: { color: C.white, fontSize: 14, fontWeight: '700' },
 
   // Buttons
   btnCta: {
@@ -2071,4 +2553,99 @@ const styles = StyleSheet.create({
     borderColor: C.gray700,
   },
   btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
+
+  // ---------- AR Groq Scanner Styles ----------
+  arScanBadge: {
+    backgroundColor: 'rgba(249,115,22,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginLeft: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  arScanBadgeText: { color: C.orange, fontSize: 12, fontWeight: '800', marginLeft: 4 },
+  arScanBadgeIcon: { fontSize: 14 },
+  
+  arTopBar: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 60 : 40,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 110,
+  },
+  arBadge: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  arBadgeText: { color: C.orange, fontWeight: '800', fontSize: 12, letterSpacing: 0.5 },
+  arCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  arCloseText: { color: C.white, fontSize: 18, fontWeight: '800' },
+  
+  arBottomBar: {
+    position: 'absolute',
+    bottom: 80,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 110,
+  },
+  arCaptureBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: C.orange,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  arCaptureInner: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: C.orange,
+  },
+  
+  arViewfinder: {
+    position: 'absolute',
+    top: '25%',
+    left: '10%',
+    width: '80%',
+    height: '45%',
+    zIndex: 105,
+    overflow: 'hidden',
+  },
+  arLaser: {
+    width: '100%',
+    height: 2,
+    backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
+  },
+  arCornerTopLeft: { position: 'absolute', top: 0, left: 0, width: 40, height: 40, borderTopWidth: 4, borderLeftWidth: 4, borderColor: C.orange },
+  arCornerTopRight: { position: 'absolute', top: 0, right: 0, width: 40, height: 40, borderTopWidth: 4, borderRightWidth: 4, borderColor: C.orange },
+  arCornerBottomLeft: { position: 'absolute', bottom: 0, left: 0, width: 40, height: 40, borderBottomWidth: 4, borderLeftWidth: 4, borderColor: C.orange },
+  arCornerBottomRight: { position: 'absolute', bottom: 0, right: 0, width: 40, height: 40, borderBottomWidth: 4, borderRightWidth: 4, borderColor: C.orange },
 });

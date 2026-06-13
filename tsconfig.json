@@ -3,7 +3,10 @@
     "allowJs": true,
     "esModuleInterop": true,
     "jsx": "react-native",
-    "lib": ["DOM", "ESNext"],
+    "lib": [
+      "DOM",
+      "ESNext"
+    ],
     "moduleResolution": "node",
     "noEmit": true,
     "resolveJsonModule": true,
@@ -12,11 +15,14 @@
     "strict": true,
     "module": "esnext",
     "forceConsistentCasingInFileNames": true,
-    "types": ["nativewind/types"]
+    "types": [
+      "nativewind/types"
+    ] 
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
     "app.d.ts"
-  ]
+  ],
+  "extends": "expo/tsconfig.base"
 }

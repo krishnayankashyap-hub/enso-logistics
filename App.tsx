@@ -3,7 +3,7 @@ import SenderApp from './src/SenderApp';
 import DriverApp from './src/DriverApp';
 
 export default function App() {
-  // This reads the secret tag from your terminal command
+  // This reads the secret tag from terminal command
   const appRole = process.env.EXPO_PUBLIC_APP_ROLE;
 
   // If the command specifies 'driver', load the Driver Radar

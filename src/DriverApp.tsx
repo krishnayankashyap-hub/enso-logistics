@@ -18,6 +18,8 @@ import {
   Linking,
   Image,
   Vibration,
+  Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import {
   createUserWithEmailAndPassword,
@@ -41,32 +43,71 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from './config/firebaseConfig';
+import { Feather } from '@expo/vector-icons';
 
 const { height } = Dimensions.get('window');
 
-// ==========================================
-// DESIGN TOKENS — ORANGE & BLACK THEME
-// ==========================================
 const C = {
   orange: '#F97316',
   orangeDark: '#EA580C',
+  orangeSoft: 'rgba(249,115,22,0.12)',
+  orangeSoftStrong: 'rgba(249,115,22,0.18)',
+  orangeBorder: 'rgba(249,115,22,0.30)',
+  orangeGlow: 'rgba(249,115,22,0.35)',
+
   black: '#0A0A0A',
   charcoal: '#171717',
   line: '#262626',
   gray700: '#404040',
+  gray600: '#525252',
   gray500: '#737373',
   gray400: '#A3A3A3',
   white: '#FFFFFF',
+
+  surface: '#141416',
+  surfaceAlt: '#1B1B1E',
+  field: 'rgba(255,255,255,0.055)',
+  fieldFocus: 'rgba(255,255,255,0.09)',
+  hairline: 'rgba(255,255,255,0.08)',
+  hairlineStrong: 'rgba(255,255,255,0.14)',
+  textHi: '#FAFAFA',
+  danger: '#F87171',
+
+  glass: 'rgba(18,18,20,0.62)',
+  glassStrong: 'rgba(16,16,18,0.80)',
+  glassSheet: 'rgba(13,13,15,0.84)',
+  glassBorder: 'rgba(255,255,255,0.10)',
+  glassBorderStrong: 'rgba(255,255,255,0.16)',
+  shadow: '#000000',
 };
 
-// Fallback point if GPS is unavailable (Guwahati)
+const webGlass: any =
+  Platform.OS === 'web'
+    ? { backdropFilter: 'blur(22px) saturate(150%)', WebkitBackdropFilter: 'blur(22px) saturate(150%)' }
+    : null;
+
+const MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0f0f10' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#6b6b6b' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0a0a' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#141716' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1c1c1e' }] },
+  { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2a2a2d' }] },
+  { featureType: 'road.local', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#05080d' }] },
+];
+
 const FALLBACK_COORDS = { latitude: 26.1445, longitude: 91.7362 };
 
 const ACTIVE_STATUSES = ['accepted', 'picked_up'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const VEHICLES = ['Bike', 'Car', 'Van', 'Truck'];
 
-// Native-only modules (loaded safely so web doesn't crash)
 let MapView: any = null;
 let Marker: any = null;
 let Location: any = null;
@@ -77,7 +118,6 @@ if (Platform.OS !== 'web') {
   Location = require('expo-location');
 }
 
-// Cross-platform alert helpers
 const notify = (title: string, message?: string) => {
   if (Platform.OS === 'web') {
     window.alert(message ? `${title}\n\n${message}` : title);
@@ -98,7 +138,14 @@ const confirmAsk = (title: string, message: string, onYes: () => void) => {
   }
 };
 
-// "12 Jun, 4:30 PM" — works everywhere, no Intl needed
+const haptic = () => {
+  if (Platform.OS === 'android') {
+    try {
+      Vibration.vibrate(8);
+    } catch (e) {}
+  }
+};
+
 const formatDate = (ts: any) => {
   if (!ts?.toDate) return 'Just now';
   const d = ts.toDate();
@@ -109,7 +156,6 @@ const formatDate = (ts: any) => {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${h}:${mm} ${ampm}`;
 };
 
-// Straight-line distance in km between two points
 const distKm = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) => {
   const R = 6371;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -121,14 +167,12 @@ const distKm = (a: { latitude: number; longitude: number }, b: { latitude: numbe
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 };
 
-// Rotating messages while waiting for shipments
 const WAITING_TIPS = [
   'Stay near the highway — most pickups are on the line.',
   'New shipments appear here the moment a sender posts them.',
   'Keep location on so distances stay accurate.',
 ];
 
-// Copy for each job status
 const JOB_COPY: Record<string, { title: string; subtitle: string }> = {
   accepted: {
     title: 'Head to pickup',
@@ -155,31 +199,115 @@ const STEPS = [
 ];
 const STEP_INDEX: Record<string, number> = { accepted: 0, picked_up: 1, delivered: 2 };
 
-// Badge colors for the Activity list
 const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
-  accepted: { label: 'Accepted', color: C.orange, bg: 'rgba(249,115,22,0.12)' },
-  picked_up: { label: 'In transit', color: C.orange, bg: 'rgba(249,115,22,0.12)' },
+  accepted: { label: 'Accepted', color: C.orange, bg: C.orangeSoft },
+  picked_up: { label: 'In transit', color: C.orange, bg: C.orangeSoft },
   delivered: { label: 'Delivered', color: C.white, bg: 'rgba(255,255,255,0.08)' },
   cancelled: { label: 'Cancelled', color: C.gray500, bg: 'rgba(115,115,115,0.12)' },
   searching: { label: 'Released', color: C.gray500, bg: 'rgba(115,115,115,0.12)' },
 };
 
 const TABS = [
-  { key: 'home', icon: '🛻', label: 'Drive' },
-  { key: 'activity', icon: '🧾', label: 'Activity' },
-  { key: 'profile', icon: '👤', label: 'Profile' },
+  { key: 'home', icon: 'truck', label: 'Drive' },
+  { key: 'activity', icon: 'file-text', label: 'Activity' },
+  { key: 'profile', icon: 'user', label: 'Profile' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
 type LatLng = { latitude: number; longitude: number };
+type ActivityFilter = 'all' | 'active' | 'delivered' | 'cancelled';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const PressableScale = ({
+  style,
+  children,
+  onPress,
+  disabled,
+  hitSlop,
+  accessibilityLabel,
+  accessibilityRole = 'button',
+  accessibilityState,
+  scaleTo = 0.97,
+  haptics = true,
+  ...rest
+}: any) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () =>
+    Animated.spring(scale, { toValue: scaleTo, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  const pressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+  return (
+    <AnimatedPressable
+      onPress={(e: any) => {
+        if (disabled) return;
+        if (haptics) haptic();
+        onPress?.(e);
+      }}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      disabled={disabled}
+      hitSlop={hitSlop}
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
+      style={[style, { transform: [{ scale }] }]}
+      {...rest}
+    >
+      {children}
+    </AnimatedPressable>
+  );
+};
+
+const Shimmer = ({ style }: any) => {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(t, { toValue: 1, duration: 1050, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(t, { toValue: 0, duration: 1050, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  const opacity = t.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.9] });
+  return <Animated.View style={[styles.skeleton, { opacity }, style]} />;
+};
+
+const SkeletonCard = () => (
+  <View style={styles.historyCard}>
+    <View style={styles.historyTop}>
+      <Shimmer style={{ width: '52%', height: 16, borderRadius: 6 }} />
+      <Shimmer style={{ width: 74, height: 22, borderRadius: 11 }} />
+    </View>
+    <Shimmer style={{ width: '78%', height: 12, borderRadius: 6, marginBottom: 14 }} />
+    <Shimmer style={{ width: '38%', height: 11, borderRadius: 6 }} />
+  </View>
+);
+
+const FadeInView = ({ children, style }: any) => {
+  const a = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(a, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] },
+        style,
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
 
 export default function App() {
-  // --- AUTH STATE ---
   const [user, setUser] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [driverProfile, setDriverProfile] = useState<any>(null);
 
-  // Auth form state
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -187,48 +315,48 @@ export default function App() {
   const [vehicle, setVehicle] = useState('Bike');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Driver state
   const [online, setOnline] = useState(false);
   const [availableJobs, setAvailableJobs] = useState<any[]>([]);
-  const [declinedJobs, setDeclinedJobs] = useState<string[]>([]); // Memory for cancelled/declined jobs
+  const [declinedJobs, setDeclinedJobs] = useState<string[]>([]); 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [ticker, setTicker] = useState(Date.now()); // Live clock for 60s countdown
+  const [ticker, setTicker] = useState(Date.now()); 
 
-  // AI Relay Route State
   const [showRouteModal, setShowRouteModal] = useState(false);
   const [routeStart, setRouteStart] = useState('');
   const [routeEnd, setRouteEnd] = useState('');
 
-  // AI Combined Pooling State
   const [showPoolModal, setShowPoolModal] = useState(false);
 
-  // Navigation + history + sheet
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [history, setHistory] = useState<any[]>([]);
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
-  // Real location (live — drivers move)
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [activitySearch, setActivitySearch] = useState('');
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
+  const [inputFocus, setInputFocus] = useState<string | null>(null);
+
   const [coords, setCoords] = useState<LatLng | null>(null);
   const [locationDenied, setLocationDenied] = useState(false);
   const coordsRef = useRef<LatLng | null>(null);
   const mapRef = useRef<any>(null);
   const mapIframeRef = useRef<any>(null);
 
-  // Animations / rotating tips
+  const { width: winW } = useWindowDimensions();
+  const isWide = winW >= 720;
+
   const pulse = useRef(new Animated.Value(1)).current;
   const dashAnim = useRef(new Animated.Value(0)).current;
   const bobAnim = useRef(new Animated.Value(0)).current;
   const [tipIndex, setTipIndex] = useState(0);
 
-  // Derived Values
   const jobStatus: string | undefined = activeJob?.status;
   const isScanning = online && !activeJobId;
   const truckActive = jobStatus === 'picked_up';
 
-  // Tick the clock every second to power the 60s countdown
   useEffect(() => {
     const t = setInterval(() => setTicker(Date.now()), 1000);
     return () => clearInterval(t);
@@ -241,7 +369,6 @@ export default function App() {
     return da - dbb;
   });
 
-  // Filter out declined jobs OR jobs older than 60 seconds
   const visibleJobs = jobsSorted.filter((job) => {
     if (declinedJobs.includes(job.id)) return false;
     const ageSecs = job.created_at ? Math.floor((ticker - (job.created_at?.toMillis?.() || ticker)) / 1000) : 0;
@@ -257,9 +384,6 @@ export default function App() {
     coordsRef.current = coords;
   }, [coords]);
 
-  // ------------------------------------------
-  // 1. LISTEN FOR LOGIN SESSIONS
-  // ------------------------------------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -268,9 +392,6 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // ------------------------------------------
-  // 2. LOAD THE DRIVER PROFILE (name + vehicle)
-  // ------------------------------------------
   useEffect(() => {
     if (!user) {
       setDriverProfile(null);
@@ -282,7 +403,6 @@ export default function App() {
         if (snap.exists()) {
           setDriverProfile(snap.data());
         } else {
-          // Account exists but no profile yet (e.g. created elsewhere)
           setDriverProfile({ name: user.email?.split('@')[0] ?? 'Driver', vehicle: '—' });
         }
       } catch {
@@ -291,9 +411,6 @@ export default function App() {
     })();
   }, [user]);
 
-  // ------------------------------------------
-  // 3. LIVE GPS — drivers move, so we watch position
-  // ------------------------------------------
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -303,7 +420,7 @@ export default function App() {
     (async () => {
       try {
         if (Platform.OS === 'web') {
-          // @ts-ignore - browser geolocation
+          // @ts-ignore
           webId = navigator.geolocation?.watchPosition(
             (pos: any) => {
               if (!cancelled) {
@@ -322,7 +439,7 @@ export default function App() {
           sub = await Location.watchPositionAsync(
             {
               accuracy: Location.Accuracy.Balanced,
-              distanceInterval: 50, // metres between updates
+              distanceInterval: 50, 
               timeInterval: 10000,
             },
             (pos: any) => {
@@ -345,7 +462,6 @@ export default function App() {
     };
   }, [user]);
 
-  // Centre the map on the driver the first time we get a fix
   const centeredOnce = useRef(false);
   useEffect(() => {
     if (coords && !centeredOnce.current) {
@@ -358,9 +474,6 @@ export default function App() {
     }
   }, [coords]);
 
-  // ------------------------------------------
-  // 4. RESUME AN ACTIVE JOB AFTER APP RESTART
-  // ------------------------------------------
   useEffect(() => {
     if (!user) {
       setActiveJobId(null);
@@ -379,20 +492,16 @@ export default function App() {
         );
         const snap = await getDocs(q);
         if (!snap.empty) {
-          // OPTIMISTIC UI FIX: Eagerly set the active job data before snapshot loads
           setActiveJob({ id: snap.docs[0].id, ...snap.docs[0].data() });
           setActiveJobId(snap.docs[0].id);
           setOnline(true);
         }
       } catch {
-        // Offline or index still building — safe to ignore
+        
       }
     })();
   }, [user]);
 
-  // ------------------------------------------
-  // 5. LIVE LISTENER on the active job
-  // ------------------------------------------
   useEffect(() => {
     if (!activeJobId) return;
     const unsub = onSnapshot(doc(db, 'Packages', activeJobId), (snap) => {
@@ -402,7 +511,6 @@ export default function App() {
         return;
       }
       const data: any = { id: snap.id, ...snap.data() };
-      // If the job was released back to the pool, let go of it
       if (data.status === 'searching') {
         setActiveJobId(null);
         setActiveJob(null);
@@ -413,15 +521,11 @@ export default function App() {
     return unsub;
   }, [activeJobId]);
 
-  // ------------------------------------------
-  // 6. AVAILABLE SHIPMENTS — live feed while online
-  // ------------------------------------------
   useEffect(() => {
     if (!user || !online) {
       setAvailableJobs([]);
       return;
     }
-    // Driver can see available jobs even if they have an active one (for Pooling)
     const q = query(collection(db, 'Packages'), where('status', '==', 'searching'), limit(25));
     const unsub = onSnapshot(
       q,
@@ -433,9 +537,6 @@ export default function App() {
     return unsub;
   }, [user, online]);
 
-  // ------------------------------------------
-  // UPDATE WEB MAP MARKERS DYNAMICALLY
-  // ------------------------------------------
   useEffect(() => {
     if (Platform.OS === 'web' && mapIframeRef.current) {
       const availablePayload = online 
@@ -452,9 +553,6 @@ export default function App() {
     }
   }, [coords, activeJob, online, visibleJobs]);
 
-  // ------------------------------------------
-  // 7. 60-SECOND ALARM SOUND / VIBRATION FOR NEW JOBS
-  // ------------------------------------------
   useEffect(() => {
     let audio: any = null;
     let interval: any = null;
@@ -468,11 +566,9 @@ export default function App() {
           audio.play().catch(() => {});
         } catch (e) {}
       } else {
-        // Vibrate continuously on native devices
         interval = setInterval(() => Vibration.vibrate(500), 2000);
       }
 
-      // Stop the alarm forcefully after 60 seconds
       timeout = setTimeout(() => {
         if (audio) { audio.pause(); audio.currentTime = 0; }
         if (interval) clearInterval(interval);
@@ -487,14 +583,13 @@ export default function App() {
   }, [online, visibleJobs.length, activeJobId]);
 
 
-  // ------------------------------------------
-  // 8. ACTIVITY — this driver's past jobs
-  // ------------------------------------------
   useEffect(() => {
     if (!user) {
       setHistory([]);
+      setHistoryLoading(false);
       return;
     }
+    setHistoryLoading(true);
     const q = query(collection(db, 'Packages'), where('driver_id', '==', user.uid), limit(50));
     const unsub = onSnapshot(
       q,
@@ -504,16 +599,15 @@ export default function App() {
           (a, b) => (b.created_at?.toMillis?.() ?? Date.now()) - (a.created_at?.toMillis?.() ?? 0)
         );
         setHistory(rows);
+        setHistoryLoading(false);
       },
-      () => {}
+      () => {
+        setHistoryLoading(false);
+      }
     );
     return unsub;
   }, [user]);
 
-  // ------------------------------------------
-  // 9. LIVE UBER TRACKING (FAST 4-SECOND PING)
-  //    Updates location for ALL packages driver is carrying
-  // ------------------------------------------
   useEffect(() => {
     if (!online || history.length === 0) return;
     const activeJobs = history.filter(h => ACTIVE_STATUSES.includes(h.status));
@@ -530,15 +624,14 @@ export default function App() {
            });
         });
       } catch {
-        // transient network issues are fine
+        
       }
     };
     push();
-    const id = setInterval(push, 4000); // 4 seconds for real-time tracking
+    const id = setInterval(push, 4000); 
     return () => clearInterval(id);
   }, [online, history]);
 
-  // Pulse + rotating tips while scanning for shipments
   useEffect(() => {
     if (!isScanning) return;
     const anim = Animated.loop(
@@ -555,7 +648,6 @@ export default function App() {
     };
   }, [isScanning]);
 
-  // 🚚 Truck drive animation while delivering
   useEffect(() => {
     if (!truckActive) return;
     dashAnim.setValue(0);
@@ -584,9 +676,6 @@ export default function App() {
   const dashTranslate = dashAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -40] });
   const truckBob = bobAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
 
-  // ------------------------------------------
-  // 10. FIREBASE AUTHENTICATION (with driver profile)
-  // ------------------------------------------
   const handleAuthentication = async () => {
     if (!email || !password) {
       notify('Missing details', 'Enter both your email and password to continue.');
@@ -624,9 +713,6 @@ export default function App() {
     await signOut(auth);
   };
 
-  // ------------------------------------------
-  // 11. ACCEPT A SHIPMENT — transaction-safe
-  // ------------------------------------------
   const acceptJob = async (job: any) => {
     if (!user || acceptingId) return;
     setAcceptingId(job.id);
@@ -645,11 +731,9 @@ export default function App() {
           accepted_at: serverTimestamp(),
         });
       });
-      // OPTIMISTIC UI FIX: Eagerly set the active job data so it instantly displays
       setActiveJob({ ...job, status: 'accepted' });
       setActiveJobId(job.id);
       setSheetCollapsed(false);
-      // Fit the map to driver + pickup
       const p = job.pickup_coords;
       if (p && coords) {
         if (Platform.OS === 'web' && mapIframeRef.current) {
@@ -668,14 +752,10 @@ export default function App() {
     }
   };
 
-  // Decline a job (local memory so it hides)
   const declineJob = (jobId: string) => {
     setDeclinedJobs(prev => [...prev, jobId]);
   };
 
-  // ------------------------------------------
-  // 12. PROGRESS THE JOB:  accepted → picked_up → delivered
-  // ------------------------------------------
   const advanceStatus = async () => {
     if (!activeJobId || !jobStatus) return;
     const next = jobStatus === 'accepted' ? 'picked_up' : jobStatus === 'picked_up' ? 'delivered' : null;
@@ -689,7 +769,6 @@ export default function App() {
         if (next === 'delivered') update.delivered_at = serverTimestamp();
         await updateDoc(doc(db, 'Packages', activeJobId), update);
         
-        // After pickup, point the map toward the drop
         if (next === 'picked_up') {
           const d = activeJob?.dropoff_coords;
           if (d && coords) {
@@ -717,7 +796,6 @@ export default function App() {
     }
   };
 
-  // Release the job back to the pool
   const releaseJob = () => {
     if (!activeJobId) return;
     confirmAsk(
@@ -725,7 +803,7 @@ export default function App() {
       'It will go back to the pool so another driver can take it.',
       async () => {
         try {
-          setDeclinedJobs(prev => [...prev, activeJobId]); // Bug Fix: Add to memory so it doesn't pop up again
+          setDeclinedJobs(prev => [...prev, activeJobId]); 
           await updateDoc(doc(db, 'Packages', activeJobId), {
             status: 'searching',
             driver_id: null,
@@ -742,9 +820,6 @@ export default function App() {
     );
   };
 
-  // ------------------------------------------
-  // AI RELAY TRANSFER LOGIC
-  // ------------------------------------------
   const transferToRelay = async () => {
     if (!activeJobId) return;
     confirmAsk(
@@ -753,9 +828,9 @@ export default function App() {
       async () => {
         setActionLoading(true);
         try {
-          setDeclinedJobs(prev => [...prev, activeJobId]); // Bug Fix: Hide it locally after relay
+          setDeclinedJobs(prev => [...prev, activeJobId]); 
           await updateDoc(doc(db, 'Packages', activeJobId), {
-            status: 'searching', // Sends it back into the pool for the next driver
+            status: 'searching', 
             pickup_name: `Relay Node (${driverProfile?.name || 'Driver'} dropped)`,
             pickup_coords: coords ? new GeoPoint(coords.latitude, coords.longitude) : activeJob?.pickup_coords,
             driver_id: null,
@@ -780,7 +855,6 @@ export default function App() {
     setActiveJob(null);
   };
 
-  // Open turn-by-turn navigation in Google Maps
   const openNavigation = () => {
     const target =
       jobStatus === 'picked_up' && activeJob?.dropoff_coords
@@ -790,29 +864,26 @@ export default function App() {
       notify('No coordinates', 'This stop has no pinned location to navigate to.');
       return;
     }
-    // Launch actual Google Maps navigation route directly to coordinates
     Linking.openURL(
       `maps.google.com/maps?q={target.latitude},${target.longitude}`
     );
   };
 
-  // ==========================================
-  // VIEW: SPLASH
-  // ==========================================
   if (isInitializing) {
     return (
       <View style={styles.center}>
-        <Text style={styles.splashLogo}>
-          Enso<Text style={{ color: C.orange }}> Driver</Text>
-        </Text>
-        <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 24 }} />
+        <StatusBar barStyle="light-content" backgroundColor={C.black} />
+        <View style={styles.splashMark}>
+          <Text style={styles.splashLogo}>
+            Enso<Text style={{ color: C.orange }}> Driver</Text>
+          </Text>
+        </View>
+        <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 28 }} />
+        <Text style={styles.splashTagline}>Driver partner network</Text>
       </View>
     );
   }
 
-  // ==========================================
-  // VIEW: LOGIN / SIGN UP
-  // ==========================================
   if (!user) {
     return (
       <KeyboardAvoidingView
@@ -820,81 +891,103 @@ export default function App() {
         style={styles.authContainer}
       >
         <StatusBar barStyle="light-content" backgroundColor={C.black} />
+        <ScrollView contentContainerStyle={styles.authScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.authCard}>
           <Text style={styles.authLogo}>
             Enso<Text style={{ color: C.orange }}> Driver</Text>
           </Text>
           <Text style={styles.authSubtitle}>
-            Earn on routes you\u2019re already driving.
+            Earn on routes you{'\u2019'}re already driving.
           </Text>
 
           {!isLoginMode && (
             <>
               <Text style={styles.inputLabel}>Full name</Text>
-              <TextInput
-                style={styles.inputBox}
-                placeholder="Shown to senders when you accept"
-                placeholderTextColor={C.gray500}
-                selectionColor={C.orange}
-                value={name}
-                onChangeText={setName}
-                // @ts-ignore
-                outlineStyle="none"
-              />
+              <View style={[styles.inputBox, inputFocus === 'name' && styles.inputBoxFocused]}>
+                <Feather name="user" size={16} color={C.gray500} style={{ marginRight: 12 }} />
+                <TextInput
+                  style={styles.inputField}
+                  placeholder="Shown to senders when you accept"
+                  placeholderTextColor={C.gray500}
+                  selectionColor={C.orange}
+                  value={name}
+                  onChangeText={setName}
+                  onFocus={() => setInputFocus('name')}
+                  onBlur={() => setInputFocus((f) => (f === 'name' ? null : f))}
+                  accessibilityLabel="Full name"
+                  // @ts-ignore
+                  outlineStyle="none"
+                />
+              </View>
 
               <Text style={styles.inputLabel}>Vehicle</Text>
               <View style={styles.vehicleRow}>
                 {VEHICLES.map((v) => (
-                  <TouchableOpacity
+                  <PressableScale
                     key={v}
                     style={[styles.vehicleChip, vehicle === v && styles.vehicleChipActive]}
                     onPress={() => setVehicle(v)}
-                    activeOpacity={0.8}
+                    scaleTo={0.95}
+                    accessibilityLabel={`Vehicle ${v}`}
+                    accessibilityState={{ selected: vehicle === v }}
                   >
                     <Text
                       style={[styles.vehicleChipText, vehicle === v && styles.vehicleChipTextActive]}
                     >
                       {v}
                     </Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 ))}
               </View>
             </>
           )}
 
           <Text style={styles.inputLabel}>Email</Text>
-          <TextInput
-            style={styles.inputBox}
-            placeholder="you@example.com"
-            placeholderTextColor={C.gray500}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-            selectionColor={C.orange}
-            value={email}
-            onChangeText={setEmail}
-            // @ts-ignore
-            outlineStyle="none"
-          />
+          <View style={[styles.inputBox, inputFocus === 'email' && styles.inputBoxFocused]}>
+            <Feather name="mail" size={16} color={C.gray500} style={{ marginRight: 12 }} />
+            <TextInput
+              style={styles.inputField}
+              placeholder="you@example.com"
+              placeholderTextColor={C.gray500}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              selectionColor={C.orange}
+              value={email}
+              onChangeText={setEmail}
+              onFocus={() => setInputFocus('email')}
+              onBlur={() => setInputFocus((f) => (f === 'email' ? null : f))}
+              accessibilityLabel="Email address"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+          </View>
 
           <Text style={styles.inputLabel}>Password</Text>
-          <TextInput
-            style={styles.inputBox}
-            placeholder="••••••••"
-            placeholderTextColor={C.gray500}
-            secureTextEntry
-            selectionColor={C.orange}
-            value={password}
-            onChangeText={setPassword}
-            // @ts-ignore
-            outlineStyle="none"
-          />
+          <View style={[styles.inputBox, inputFocus === 'password' && styles.inputBoxFocused]}>
+            <Feather name="lock" size={16} color={C.gray500} style={{ marginRight: 12 }} />
+            <TextInput
+              style={styles.inputField}
+              placeholder="••••••••"
+              placeholderTextColor={C.gray500}
+              secureTextEntry
+              selectionColor={C.orange}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={() => setInputFocus('password')}
+              onBlur={() => setInputFocus((f) => (f === 'password' ? null : f))}
+              accessibilityLabel="Password"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+          </View>
 
-          <TouchableOpacity
-            style={[styles.btnPrimary, authLoading && { backgroundColor: C.orangeDark }]}
+          <PressableScale
+            style={[styles.btnPrimary, authLoading && styles.btnPrimaryLoading]}
             onPress={handleAuthentication}
             disabled={authLoading}
-            activeOpacity={0.85}
+            accessibilityLabel={isLoginMode ? 'Log in' : 'Start driving'}
+            accessibilityState={{ disabled: authLoading }}
           >
             {authLoading ? (
               <ActivityIndicator color={C.black} />
@@ -903,12 +996,14 @@ export default function App() {
                 {isLoginMode ? 'Log in' : 'Start driving'}
               </Text>
             )}
-          </TouchableOpacity>
+          </PressableScale>
 
           <TouchableOpacity
             style={styles.authToggle}
             onPress={() => setIsLoginMode(!isLoginMode)}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={isLoginMode ? 'Switch to sign up' : 'Switch to log in'}
           >
             <Text style={styles.authToggleText}>
               {isLoginMode ? (
@@ -924,22 +1019,62 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.authFooter}>Your route. Your earnings.</Text>
+        <Text style={styles.authFooter}>Your route · Your earnings</Text>
+        </ScrollView>
       </KeyboardAvoidingView>
     );
   }
 
-  // ==========================================
-  // VIEW: MAIN APP
-  // ==========================================
   const mapCenter = coords ?? FALLBACK_COORDS;
   const jobCopy = jobStatus ? JOB_COPY[jobStatus] ?? null : null;
   const showJobCard = !!activeJob && !!jobCopy;
   const jobFinished = jobStatus === 'delivered' || jobStatus === 'cancelled';
   const userInitial = (driverProfile?.name?.[0] ?? user.email?.[0] ?? 'D').toUpperCase();
   const deliveredCount = history.filter((h) => h.status === 'delivered').length;
+  const activeCount = history.filter((h) => ACTIVE_STATUSES.includes(h.status)).length;
 
-  // Generate Leaflet Interactive Map HTML for Web
+  const activityQuery = activitySearch.trim().toLowerCase();
+  const filteredHistory = history.filter((h) => {
+    const matchesQuery =
+      !activityQuery ||
+      [h.item_name, h.destination_name, h.pickup_name]
+        .filter(Boolean)
+        .some((s) => String(s).toLowerCase().includes(activityQuery));
+    const matchesFilter =
+      activityFilter === 'all'
+        ? true
+        : activityFilter === 'active'
+        ? ACTIVE_STATUSES.includes(h.status)
+        : activityFilter === 'delivered'
+        ? h.status === 'delivered'
+        : h.status === 'cancelled';
+    return matchesQuery && matchesFilter;
+  });
+
+  const dateGroupOf = (ts: any): string => {
+    const d = ts?.toDate ? ts.toDate() : null;
+    if (!d) return 'Earlier';
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const t = d.getTime();
+    if (t >= startToday) return 'Today';
+    if (t >= startToday - 86400000) return 'Yesterday';
+    if (t >= startToday - 7 * 86400000) return 'This week';
+    return 'Earlier';
+  };
+  const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
+  const groupedHistory = GROUP_ORDER.map((g) => ({
+    group: g,
+    rows: filteredHistory.filter((h) => dateGroupOf(h.created_at) === g),
+  })).filter((s) => s.rows.length > 0);
+
+  const ACTIVITY_FILTERS: { key: ActivityFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'active', label: 'Active' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'cancelled', label: 'Cancelled' },
+  ];
+
   const leafletMapHtml = `
     <!DOCTYPE html>
     <html>
@@ -948,23 +1083,24 @@ export default function App() {
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
       <style>
-        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background:#0a0a0a; }
       </style>
     </head>
     <body>
       <div id="map"></div>
       <script>
         const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([${mapCenter.latitude}, ${mapCenter.longitude}], 13);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
 
         let driverMarker = null;
         let pickupMarker = null;
         let dropMarker = null;
         let availableMarkers = [];
 
-        const driverIcon = L.divIcon({ html: '<div style="font-size:24px; background:white; border-radius:50%; width:30px; height:30px; display:flex; justify-content:center; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.3)">🛻</div>', className: '', iconSize: [30, 30], iconAnchor: [15, 15] });
-        const orangeIcon = L.divIcon({ html: '<div style="font-size:24px">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
-        const blackIcon = L.divIcon({ html: '<div style="font-size:24px; filter: grayscale(1)">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+        const driverIcon = L.divIcon({ html: '<div style="background:#fff; border-radius:50%; width:34px; height:34px; display:flex; justify-content:center; align-items:center; box-shadow:0 6px 16px rgba(0,0,0,0.5)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg></div>', className: '', iconSize: [34, 34], iconAnchor: [17, 17] });
+        const orangeIcon = L.divIcon({ html: '<div style="width:22px; height:22px; border-radius:50%; background:#F97316; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
+        const blackIcon = L.divIcon({ html: '<div style="width:20px; height:20px; border-radius:6px; background:#fff; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
+        const availIcon = L.divIcon({ html: '<div style="width:16px; height:16px; border-radius:50%; background:rgba(249,115,22,0.55); border:2px solid #F97316; box-shadow:0 2px 8px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
 
         window.addEventListener('message', (event) => {
           try {
@@ -989,7 +1125,7 @@ export default function App() {
               
               if (data.available && data.available.length > 0) {
                  data.available.forEach(job => {
-                    const m = L.marker([job.lat, job.lng], {icon: orangeIcon}).addTo(map);
+                    const m = L.marker([job.lat, job.lng], {icon: availIcon}).addTo(map);
                     availableMarkers.push(m);
                  });
               }
@@ -1004,29 +1140,39 @@ export default function App() {
   return (
     <View style={styles.appRoot}>
       <StatusBar
-        barStyle={activeTab === 'home' ? 'dark-content' : 'light-content'}
+        barStyle="light-content"
         backgroundColor="transparent"
         translucent
       />
 
-      {/* ---------- AI POOLING MODAL ---------- */}
       {showPoolModal && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 110, justifyContent: 'center', padding: 20 }]}>
-          <View style={styles.routeCard}>
-             <Text style={styles.routeTitle}>AI Route Pooling</Text>
-             <Text style={styles.routeSub}>Scanning for packages overlapping with your current trajectory...</Text>
-             <ScrollView style={{maxHeight: height * 0.5}}>
-                {visibleJobs.length === 0 ? <Text style={{color: C.gray400}}>No overlapping packages found right now.</Text> : visibleJobs.map(job => {
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.72)', zIndex: 110, justifyContent: 'center', padding: 20 }]}>
+          <View style={[styles.routeCard, webGlass]}>
+             <View style={styles.modalHeaderRow}>
+               <View style={styles.modalIconChip}>
+                 <Feather name="layers" size={16} color={C.orange} />
+               </View>
+               <View style={{ flex: 1 }}>
+                 <Text style={styles.routeTitle}>AI route pooling</Text>
+                 <Text style={styles.routeSub}>Packages overlapping with your current trajectory.</Text>
+               </View>
+             </View>
+             <ScrollView style={{maxHeight: height * 0.5}} showsVerticalScrollIndicator={false}>
+                {visibleJobs.length === 0 ? (
+                  <View style={styles.miniEmpty}>
+                    <Text style={styles.miniEmptyText}>No overlapping packages found right now.</Text>
+                  </View>
+                ) : visibleJobs.map(job => {
                   const p = job.pickup_coords;
                   const d = job.dropoff_coords;
                   const tripDist = p && d ? distKm(p, d) : 10;
-                  const estPrice = Math.round(150 + (tripDist * 14)); // Pricing Formula
+                  const estPrice = Math.round(150 + (tripDist * 14)); 
 
                   return (
                    <View key={job.id} style={styles.jobCard}>
                      <View style={{flexDirection: 'row', alignItems: 'center'}}>
                        {job.cargo_image && (
-                          <Image source={{uri: job.cargo_image}} style={{width: 50, height: 50, borderRadius: 8, marginRight: 12, backgroundColor: C.black}} />
+                          <Image source={{uri: job.cargo_image}} style={{width: 50, height: 50, borderRadius: 10, marginRight: 12, backgroundColor: C.black}} />
                        )}
                        <View style={{flex: 1}}>
                          <View style={styles.jobTop}>
@@ -1038,50 +1184,85 @@ export default function App() {
                          </Text>
                        </View>
                      </View>
-                     <TouchableOpacity style={[styles.acceptBtn, {marginTop: 10}]} onPress={() => { acceptJob(job); setShowPoolModal(false); }}>
-                        <Text style={styles.acceptBtnText}>Add to Pool</Text>
-                     </TouchableOpacity>
+                     <PressableScale style={[styles.acceptBtn, {marginTop: 12, width: '100%'}]} onPress={() => { acceptJob(job); setShowPoolModal(false); }} accessibilityLabel={`Add ${job.item_name} to pool`}>
+                        <Text style={styles.acceptBtnText}>Add to pool</Text>
+                     </PressableScale>
                    </View>
                   );
                 })}
              </ScrollView>
-             <TouchableOpacity style={{marginTop: 15, padding: 15, backgroundColor: C.charcoal, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: C.line}} onPress={() => setShowPoolModal(false)}>
-                <Text style={{color: C.white, fontWeight: '700'}}>Close</Text>
-             </TouchableOpacity>
+             <PressableScale style={styles.modalCloseBtn} onPress={() => setShowPoolModal(false)} accessibilityLabel="Close">
+                <Text style={styles.modalCloseText}>Close</Text>
+             </PressableScale>
           </View>
         </View>
       )}
 
-      {/* ---------- AI RELAY ROUTE MODAL ---------- */}
       {showRouteModal && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100, justifyContent: 'center', padding: 24 }]}>
-          <View style={styles.routeCard}>
-            <Text style={styles.routeTitle}>Set Your Relay Route</Text>
-            <Text style={styles.routeSub}>Enter your path so the AI can match you with overlapping shipments along your journey.</Text>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.72)', zIndex: 100, justifyContent: 'center', padding: 24 }]}>
+          <View style={[styles.routeCard, webGlass]}>
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalIconChip}>
+                <Feather name="git-merge" size={16} color={C.orange} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.routeTitle}>Set your relay route</Text>
+                <Text style={styles.routeSub}>So the AI can match overlapping shipments along your journey.</Text>
+              </View>
+            </View>
 
             <Text style={styles.inputLabel}>Starting point</Text>
-            <TextInput style={styles.inputBox} placeholder="e.g. Guwahati" placeholderTextColor={C.gray500} value={routeStart} onChangeText={setRouteStart} />
+            <View style={[styles.inputBox, inputFocus === 'routeStart' && styles.inputBoxFocused]}>
+              <Feather name="map-pin" size={16} color={C.orange} style={{ marginRight: 12 }} />
+              <TextInput
+                style={styles.inputField}
+                placeholder="e.g. Guwahati"
+                placeholderTextColor={C.gray500}
+                selectionColor={C.orange}
+                value={routeStart}
+                onChangeText={setRouteStart}
+                onFocus={() => setInputFocus('routeStart')}
+                onBlur={() => setInputFocus((f) => (f === 'routeStart' ? null : f))}
+                accessibilityLabel="Starting point"
+                // @ts-ignore
+                outlineStyle="none"
+              />
+            </View>
 
             <Text style={styles.inputLabel}>Destination</Text>
-            <TextInput style={styles.inputBox} placeholder="e.g. Shillong" placeholderTextColor={C.gray500} value={routeEnd} onChangeText={setRouteEnd} />
+            <View style={[styles.inputBox, inputFocus === 'routeEnd' && styles.inputBoxFocused]}>
+              <Feather name="flag" size={16} color={C.gray500} style={{ marginRight: 12 }} />
+              <TextInput
+                style={styles.inputField}
+                placeholder="e.g. Shillong"
+                placeholderTextColor={C.gray500}
+                selectionColor={C.orange}
+                value={routeEnd}
+                onChangeText={setRouteEnd}
+                onFocus={() => setInputFocus('routeEnd')}
+                onBlur={() => setInputFocus((f) => (f === 'routeEnd' ? null : f))}
+                accessibilityLabel="Destination"
+                // @ts-ignore
+                outlineStyle="none"
+              />
+            </View>
 
-            <View style={{flexDirection: 'row', gap: 10}}>
-              <TouchableOpacity style={[styles.btnOutline, {flex: 1}]} onPress={() => setShowRouteModal(false)}>
+            <View style={{flexDirection: 'row', gap: 12, marginTop: 4}}>
+              <PressableScale style={[styles.btnOutline, {flex: 1}]} onPress={() => setShowRouteModal(false)} accessibilityLabel="Cancel">
                 <Text style={styles.btnOutlineText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.btnCta, {flex: 2}]} onPress={() => {
+              </PressableScale>
+              <PressableScale style={[styles.btnCta, {flex: 2}]} onPress={() => {
                 if(!routeStart || !routeEnd) { notify('Missing route', 'Please enter your start and end points.'); return; }
                 setShowRouteModal(false);
                 setOnline(true);
-              }}>
-                <Text style={styles.btnCtaText}>Go Online</Text>
-              </TouchableOpacity>
+              }} accessibilityLabel="Go online">
+                <Text style={styles.btnCtaText}>Go online</Text>
+              </PressableScale>
             </View>
           </View>
         </View>
       )}
 
-      {/* ---------- FULL-SCREEN SCROLLABLE MAP ---------- */}
       {Platform.OS === 'web' ? (
         <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]}>
           {/* @ts-ignore */}
@@ -1096,11 +1277,13 @@ export default function App() {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
+          customMapStyle={MAP_STYLE}
           initialRegion={{ ...mapCenter, latitudeDelta: 0.03, longitudeDelta: 0.03 }}
           showsUserLocation={true}
           showsMyLocationButton={false}
+          loadingEnabled={true}
+          loadingBackgroundColor={C.black}
         >
-          {/* Active job pins */}
           {activeJob?.pickup_coords && (
             <Marker
               coordinate={{
@@ -1123,7 +1306,6 @@ export default function App() {
               pinColor={C.black}
             />
           )}
-          {/* Available shipment pins while browsing */}
           {!activeJob &&
             online &&
             visibleJobs.map(
@@ -1144,52 +1326,52 @@ export default function App() {
         </MapView>
       )}
 
-      {/* ---------- FLOATING HEADER (home only) ---------- */}
       {activeTab === 'home' && (
-        <View style={styles.header}>
-          <View style={styles.logoBadge}>
+        <View style={styles.header} pointerEvents="box-none">
+          <View style={[styles.logoBadge, webGlass]}>
             <Text style={styles.logoBadgeText}>
               Enso<Text style={{ color: C.orange }}> Driver</Text>
             </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity
-              style={styles.onlinePill}
+            <PressableScale
+              style={[styles.onlinePill, webGlass]}
               onPress={() => {
                 if (activeJobId) {
                   notify('Finish your job first', 'Complete or release the active shipment before going offline.');
                   return;
                 }
                 if (!online) {
-                  setShowRouteModal(true); // Ask for Relay Route before going online
+                  setShowRouteModal(true); 
                 } else {
-                  setOnline(false); // Go offline directly
+                  setOnline(false); 
                 }
               }}
-              activeOpacity={0.8}
+              scaleTo={0.94}
+              accessibilityLabel={online ? 'Go offline' : 'Go online'}
             >
               <View style={[styles.onlineDot, { backgroundColor: online ? C.orange : C.gray500 }]} />
               <Text style={styles.onlineText}>{online ? 'Online' : 'Offline'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.avatarBadge}
+            </PressableScale>
+            <PressableScale
+              style={[styles.avatarBadge, webGlass]}
               onPress={() => setActiveTab('profile')}
-              activeOpacity={0.8}
+              scaleTo={0.92}
+              accessibilityLabel="Open profile"
             >
               <Text style={styles.avatarBadgeText}>{userInitial}</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       )}
 
-      {/* ---------- BOTTOM SHEET (home only) ---------- */}
       {activeTab === 'home' && (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.sheetWrap}
           pointerEvents="box-none"
         >
-          <View style={styles.bottomSheet}>
+          <View style={[styles.bottomSheet, webGlass]}>
             <TouchableOpacity
               style={styles.dragHandleTap}
               onPress={() => {
@@ -1197,16 +1379,19 @@ export default function App() {
                 Keyboard.dismiss();
               }}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={sheetCollapsed ? 'Expand sheet' : 'Collapse sheet'}
             >
               <View style={styles.dragHandle} />
             </TouchableOpacity>
 
+            <View style={[styles.sheetInner, isWide && styles.sheetInnerWide]}>
             {sheetCollapsed ? (
-              /* ================= COLLAPSED BAR ================= */
-              <TouchableOpacity
+              <PressableScale
                 style={styles.collapsedRow}
                 onPress={() => setSheetCollapsed(false)}
-                activeOpacity={0.85}
+                scaleTo={0.99}
+                accessibilityLabel="Expand sheet"
               >
                 {showJobCard ? (
                   <>
@@ -1229,15 +1414,13 @@ export default function App() {
                 ) : (
                   <>
                     <View style={[styles.pulseDotSmall, { backgroundColor: C.gray500 }]} />
-                    <Text style={styles.collapsedText}>You\u2019re offline</Text>
+                    <Text style={styles.collapsedText}>You{'\u2019'}re offline</Text>
                     <Text style={styles.collapsedAction}>Open</Text>
                   </>
                 )}
-              </TouchableOpacity>
+              </PressableScale>
             ) : showJobCard ? (
-              /* ================= ACTIVE JOB CARD ================= */
               <View>
-                {/* Step progress */}
                 {!jobFinished || jobStatus === 'delivered' ? (
                   <View style={styles.stepperRow}>
                     {STEPS.map((s, i) => {
@@ -1254,7 +1437,7 @@ export default function App() {
                           )}
                           <View style={styles.stepItem}>
                             <View style={[styles.stepDot, done && styles.stepDotDone]}>
-                              {done && <Text style={styles.stepDotCheck}>✓</Text>}
+                              {done && <Feather name="check" size={11} color={C.black} />}
                             </View>
                             <Text style={[styles.stepLabel, done && { color: C.white }]}>
                               {s.label}
@@ -1270,23 +1453,22 @@ export default function App() {
                   <View
                     style={[
                       styles.statusIcon,
-                      jobStatus === 'cancelled' && { backgroundColor: C.charcoal },
+                      jobStatus === 'cancelled' && { backgroundColor: C.surfaceAlt },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.statusIconText,
-                        jobStatus === 'cancelled' && { color: C.gray500 },
-                      ]}
-                    >
-                      {jobStatus === 'accepted'
-                        ? '→'
-                        : jobStatus === 'picked_up'
-                        ? '🚚'
-                        : jobStatus === 'delivered'
-                        ? '✓'
-                        : '✕'}
-                    </Text>
+                    <Feather
+                      name={
+                        jobStatus === 'accepted'
+                          ? 'arrow-right'
+                          : jobStatus === 'picked_up'
+                          ? 'truck'
+                          : jobStatus === 'delivered'
+                          ? 'check'
+                          : 'x'
+                      }
+                      size={20}
+                      color={jobStatus === 'cancelled' ? C.gray500 : C.black}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.statusTitle}>{jobCopy!.title}</Text>
@@ -1294,7 +1476,6 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* 🚚 Truck animation while in transit */}
                 {truckActive && (
                   <View style={styles.roadScene}>
                     <View style={styles.roadLineWrap}>
@@ -1306,26 +1487,24 @@ export default function App() {
                         ))}
                       </Animated.View>
                     </View>
-                    <Animated.Text
+                    <Animated.View
                       style={[
                         styles.truck,
                         { transform: [{ translateY: truckBob }, { scaleX: -1 }] },
                       ]}
                     >
-                      🚚
-                    </Animated.Text>
-                    <Text style={styles.roadPin}>📍</Text>
+                      <Feather name="truck" size={26} color={C.white} />
+                    </Animated.View>
+                    <Feather name="map-pin" size={16} color={C.gray500} style={{ position: 'absolute', right: 16, top: 14 }} />
                   </View>
                 )}
 
-                {/* Job details */}
                 <View style={styles.summaryCard}>
-                  {/* Driver sees the Groq AR snapshot if it exists */}
                   {activeJob.cargo_image && (
-                     <Image source={{uri: activeJob.cargo_image}} style={{width: '100%', height: 140, borderRadius: 12, marginBottom: 16, backgroundColor: C.black}} resizeMode="cover" />
+                     <Image source={{uri: activeJob.cargo_image}} style={{width: '100%', height: 140, borderRadius: 14, marginBottom: 16, backgroundColor: C.black}} resizeMode="cover" />
                   )}
                   <View style={styles.summaryRow}>
-                    <Text style={styles.summaryIcon}>📦</Text>
+                    <Feather name="package" size={14} color={C.gray400} style={{ width: 14, textAlign: 'center' }} />
                     <Text style={styles.summaryText} numberOfLines={1}>
                       {activeJob.item_name}
                     </Text>
@@ -1354,7 +1533,7 @@ export default function App() {
                     <>
                       <View style={styles.connectorLine} />
                       <View style={styles.summaryRow}>
-                        <Text style={styles.summaryIcon}>✉️</Text>
+                        <Feather name="mail" size={13} color={C.gray500} style={{ width: 14, textAlign: 'center' }} />
                         <Text style={[styles.summaryText, { color: C.gray400 }]} numberOfLines={1}>
                           {activeJob.sender_email}
                         </Text>
@@ -1363,28 +1542,31 @@ export default function App() {
                   )}
                 </View>
 
-                {/* Actions */}
                 {jobFinished ? (
-                  <TouchableOpacity style={styles.btnCta} onPress={dismissJob} activeOpacity={0.85}>
+                  <PressableScale style={styles.btnCta} onPress={dismissJob} accessibilityLabel="Continue">
                     <Text style={styles.btnCtaText}>
                       {jobStatus === 'delivered' ? 'Find next shipment' : 'Back to shipments'}
                     </Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 ) : (
                   <>
                     <View style={styles.actionRow}>
-                      <TouchableOpacity
+                      <PressableScale
                         style={styles.btnNavigate}
                         onPress={openNavigation}
-                        activeOpacity={0.8}
+                        accessibilityLabel="Navigate"
                       >
-                        <Text style={styles.btnNavigateText}>🧭 Navigate</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Feather name="navigation" size={15} color={C.white} style={{ marginRight: 7 }} />
+                          <Text style={styles.btnNavigateText}>Navigate</Text>
+                        </View>
+                      </PressableScale>
+                      <PressableScale
                         style={styles.btnCtaFlex}
                         onPress={advanceStatus}
                         disabled={actionLoading}
-                        activeOpacity={0.85}
+                        accessibilityLabel={jobStatus === 'accepted' ? 'Confirm pickup' : 'Mark as delivered'}
+                        accessibilityState={{ disabled: actionLoading }}
                       >
                         {actionLoading ? (
                           <ActivityIndicator color={C.black} />
@@ -1393,47 +1575,53 @@ export default function App() {
                             {jobStatus === 'accepted' ? 'Confirm pickup' : 'Mark as delivered'}
                           </Text>
                         )}
-                      </TouchableOpacity>
+                      </PressableScale>
                     </View>
-                    
-                    {/* Secondary Actions Row */}
+
                     {jobStatus === 'accepted' ? (
                       <View style={{flexDirection: 'row', gap: 10, marginTop: 14}}>
-                        <TouchableOpacity style={[styles.releaseBtn, {flex: 1, marginTop: 0}]} onPress={releaseJob} activeOpacity={0.7}>
+                        <PressableScale style={[styles.releaseBtn, {flex: 1, marginTop: 0}]} onPress={releaseJob} scaleTo={0.98} accessibilityLabel="Cancel job">
                           <Text style={styles.releaseText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.btnOutline, {flex: 2, paddingVertical: 12, marginTop: 0}]} onPress={transferToRelay} activeOpacity={0.7}>
-                          <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>🔄 Drop at Hub</Text>
-                        </TouchableOpacity>
+                        </PressableScale>
+                        <PressableScale style={[styles.btnOutline, {flex: 2, paddingVertical: 13, marginTop: 0}]} onPress={transferToRelay} accessibilityLabel="Drop at hub">
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Feather name="refresh-cw" size={14} color={C.orange} style={{ marginRight: 7 }} />
+                            <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>Drop at hub</Text>
+                          </View>
+                        </PressableScale>
                       </View>
                     ) : (
-                      <TouchableOpacity style={[styles.btnOutline, {marginTop: 14, paddingVertical: 12}]} onPress={transferToRelay} activeOpacity={0.7}>
-                        <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>🔄 Drop at Relay Hub</Text>
-                      </TouchableOpacity>
+                      <PressableScale style={[styles.btnOutline, {marginTop: 14, paddingVertical: 13}]} onPress={transferToRelay} accessibilityLabel="Drop at relay hub">
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Feather name="refresh-cw" size={14} color={C.orange} style={{ marginRight: 7 }} />
+                          <Text style={[styles.btnOutlineText, {color: C.orange, fontSize: 13}]}>Drop at relay hub</Text>
+                        </View>
+                      </PressableScale>
                     )}
 
-                    {/* AI Pool Scanner Button */}
-                    <TouchableOpacity style={styles.poolBtn} onPress={() => setShowPoolModal(true)} activeOpacity={0.8}>
-                       <Text style={styles.poolBtnText}>📦 Have more space? Find combined deliveries</Text>
-                    </TouchableOpacity>
+                    <PressableScale style={styles.poolBtn} onPress={() => setShowPoolModal(true)} accessibilityLabel="Find combined deliveries">
+                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                         <Feather name="layers" size={14} color={C.orange} style={{ marginRight: 8 }} />
+                         <Text style={styles.poolBtnText}>Have space? Find combined deliveries</Text>
+                       </View>
+                    </PressableScale>
                   </>
                 )}
               </View>
             ) : !online ? (
-              /* ================= OFFLINE CARD ================= */
               <View>
-                <Text style={styles.sheetTitle}>You\u2019re offline</Text>
+                <Text style={styles.sheetTitle}>You{'\u2019'}re offline</Text>
                 <Text style={styles.offlineSub}>
-                  Go online to see live shipments along your route. You\u2019ll only be shown
-                  requests while you\u2019re online.
+                  Go online to see live shipments along your route. You{'\u2019'}ll only be shown
+                  requests while you{'\u2019'}re online.
                 </Text>
-                <TouchableOpacity
+                <PressableScale
                   style={styles.btnCta}
                   onPress={() => setShowRouteModal(true)}
-                  activeOpacity={0.85}
+                  accessibilityLabel="Go online"
                 >
                   <Text style={styles.btnCtaText}>Go online</Text>
-                </TouchableOpacity>
+                </PressableScale>
                 {locationDenied && (
                   <Text style={styles.locationWarn}>
                     Location is off — turn it on so senders see accurate distances.
@@ -1441,7 +1629,6 @@ export default function App() {
                 )}
               </View>
             ) : (
-              /* ================= AVAILABLE SHIPMENTS ================= */
               <View>
                 <View style={styles.titleRow}>
                   <Text style={styles.sheetTitle}>Available shipments</Text>
@@ -1463,13 +1650,13 @@ export default function App() {
                     </View>
                     <Text style={styles.scanTitle}>Scanning for shipments…</Text>
                     <Text style={styles.scanSub}>{WAITING_TIPS[tipIndex]}</Text>
-                    <TouchableOpacity
+                    <PressableScale
                       style={styles.btnOutline}
                       onPress={() => setOnline(false)}
-                      activeOpacity={0.8}
+                      accessibilityLabel="Go offline"
                     >
                       <Text style={styles.btnOutlineText}>Go offline</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                   </View>
                 ) : (
                   <ScrollView
@@ -1482,14 +1669,13 @@ export default function App() {
                       const p = job.pickup_coords;
                       const d = job.dropoff_coords;
                       const tripDist = p && d ? distKm(p, d) : 10;
-                      const estPrice = Math.round(150 + (tripDist * 14)); // Dynamic Pricing logic
+                      const estPrice = Math.round(150 + (tripDist * 14)); 
 
                       return (
                         <View key={job.id} style={styles.jobCard}>
                           <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                            {/* Driver sees cargo preview directly in the feed */}
                             {job.cargo_image && (
-                               <Image source={{uri: job.cargo_image}} style={{width: 60, height: 60, borderRadius: 10, marginRight: 14, backgroundColor: C.black}} />
+                               <Image source={{uri: job.cargo_image}} style={{width: 60, height: 60, borderRadius: 12, marginRight: 14, backgroundColor: C.black}} />
                             )}
                             <View style={{flex: 1}}>
                               <View style={styles.jobTop}>
@@ -1505,32 +1691,34 @@ export default function App() {
                               </Text>
                             </View>
                           </View>
-                          
-                          <Text style={{color: C.orange, fontSize: 12, textAlign: 'center', marginTop: 12, fontWeight: '700'}}>
-                            ⏳ {timeLeft}s remaining to accept
-                          </Text>
+
+                          <View style={styles.countdownRow}>
+                            <Feather name="clock" size={13} color={C.orange} style={{ marginRight: 6 }} />
+                            <Text style={styles.countdownText}>{timeLeft}s remaining to accept</Text>
+                          </View>
 
                           <View style={[styles.jobBottom, {marginTop: 10, gap: 10}]}>
-                            <TouchableOpacity
+                            <PressableScale
                               style={styles.declineBtn}
                               onPress={() => declineJob(job.id)}
-                              activeOpacity={0.8}
+                              accessibilityLabel="Decline"
                             >
                               <Text style={styles.declineBtnText}>Decline</Text>
-                            </TouchableOpacity>
+                            </PressableScale>
 
-                            <TouchableOpacity
+                            <PressableScale
                               style={styles.acceptBtnFlex}
                               onPress={() => acceptJob(job)}
                               disabled={!!acceptingId}
-                              activeOpacity={0.85}
+                              accessibilityLabel="Accept"
+                              accessibilityState={{ disabled: !!acceptingId }}
                             >
                               {acceptingId === job.id ? (
                                 <ActivityIndicator size="small" color={C.black} />
                               ) : (
                                 <Text style={styles.acceptBtnText}>Accept</Text>
                               )}
-                            </TouchableOpacity>
+                            </PressableScale>
                           </View>
                         </View>
                       );
@@ -1539,13 +1727,14 @@ export default function App() {
                 )}
               </View>
             )}
+            </View>
           </View>
         </KeyboardAvoidingView>
       )}
 
-      {/* ======================= ACTIVITY TAB ======================= */}
       {activeTab === 'activity' && (
         <View style={styles.screen}>
+          <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide]}>
           <Text style={styles.screenTitle}>Activity</Text>
           <Text style={styles.screenSub}>
             {history.length === 0
@@ -1553,72 +1742,153 @@ export default function App() {
               : `${history.length} job${history.length === 1 ? '' : 's'} · ${deliveredCount} delivered`}
           </Text>
 
-          {history.length === 0 ? (
+          <View style={[styles.searchBar, inputFocus === 'activitySearch' && styles.searchBarFocused]}>
+            <Feather name="search" size={15} color={C.gray500} style={{ marginRight: 10, opacity: 0.8 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search item, pickup or destination"
+              placeholderTextColor={C.gray500}
+              selectionColor={C.orange}
+              value={activitySearch}
+              onChangeText={setActivitySearch}
+              onFocus={() => setInputFocus('activitySearch')}
+              onBlur={() => setInputFocus((f) => (f === 'activitySearch' ? null : f))}
+              accessibilityLabel="Search jobs"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+            {activitySearch.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setActivitySearch('')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Feather name="x" size={15} color={C.gray500} style={{ paddingLeft: 8 }} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterRow}
+            contentContainerStyle={{ paddingRight: 8 }}
+          >
+            {ACTIVITY_FILTERS.map((f) => {
+              const active = activityFilter === f.key;
+              return (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setActivityFilter(f.key)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Filter: ${f.label}`}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                    {f.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {historyLoading && history.length === 0 ? (
+            <View style={{ marginTop: 8 }}>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </View>
+          ) : history.length === 0 ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyEmoji}>🛻</Text>
+              <View style={styles.emptyBadge}>
+                <Feather name="truck" size={34} color={C.gray500} />
+              </View>
               <Text style={styles.emptyTitle}>No jobs yet</Text>
               <Text style={styles.emptySub}>
                 Go online and accept your first shipment — it will show up here.
               </Text>
-              <TouchableOpacity
-                style={[styles.btnCta, { marginTop: 24, width: 'auto', paddingHorizontal: 28 }]}
+              <PressableScale
+                style={[styles.btnCta, { marginTop: 24, alignSelf: 'center', paddingHorizontal: 30 }]}
                 onPress={() => {
                   setActiveTab('home');
                   setShowRouteModal(true);
                 }}
-                activeOpacity={0.85}
+                accessibilityLabel="Go online"
               >
                 <Text style={styles.btnCtaText}>Go online</Text>
-              </TouchableOpacity>
+              </PressableScale>
+            </View>
+          ) : groupedHistory.length === 0 ? (
+            <View style={styles.miniEmpty}>
+              <Text style={styles.miniEmptyText}>No jobs match your search or filter.</Text>
             </View>
           ) : (
             <ScrollView
               style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 130 }}
+              contentContainerStyle={{ paddingBottom: 130, paddingTop: 4 }}
               showsVerticalScrollIndicator={false}
             >
-              {history.map((item) => {
-                const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.accepted;
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.historyCard}
-                    activeOpacity={ACTIVE_STATUSES.includes(item.status) ? 0.7 : 1}
-                    onPress={() => {
-                      if (ACTIVE_STATUSES.includes(item.status)) {
-                         // OPTIMISTIC UI FIX: Eagerly inject the job data
-                         setActiveJob(item);
-                         setActiveJobId(item.id);
-                         setActiveTab('home');
-                         setSheetCollapsed(false);
-                      }
-                    }}
-                  >
-                    <View style={styles.historyTop}>
-                      <Text style={styles.historyItem} numberOfLines={1}>
-                        {item.item_name}
-                      </Text>
-                      <View style={[styles.statusPill, { backgroundColor: badge.bg }]}>
-                        <Text style={[styles.statusPillText, { color: badge.color }]}>
-                          {badge.label}
+              {groupedHistory.map((section) => (
+                <View key={section.group}>
+                  <Text style={styles.groupLabel}>{section.group}</Text>
+                  {section.rows.map((item) => {
+                    const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.accepted;
+                    const isActive = ACTIVE_STATUSES.includes(item.status);
+                    return (
+                      <PressableScale
+                        key={item.id}
+                        style={styles.historyCard}
+                        haptics={isActive}
+                        scaleTo={isActive ? 0.985 : 1}
+                        onPress={() => {
+                          if (ACTIVE_STATUSES.includes(item.status)) {
+                             setActiveJob(item);
+                             setActiveJobId(item.id);
+                             setActiveTab('home');
+                             setSheetCollapsed(false);
+                          }
+                        }}
+                        accessibilityLabel={`${item.item_name}, ${badge.label}`}
+                      >
+                        <View style={styles.historyTop}>
+                          <Text style={styles.historyItem} numberOfLines={1}>
+                            {item.item_name}
+                          </Text>
+                          <View style={[styles.statusPill, { backgroundColor: badge.bg }]}>
+                            <Text style={[styles.statusPillText, { color: badge.color }]}>
+                              {badge.label}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.historyDest} numberOfLines={1}>
+                          {(item.pickup_name ?? 'Pickup') + '  →  ' + item.destination_name}
                         </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.historyDest} numberOfLines={1}>
-                      {(item.pickup_name ?? 'Pickup') + '  →  ' + item.destination_name}
-                    </Text>
-                    <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+                        <View style={styles.historyBottom}>
+                          <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
+                          {isActive && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={styles.historyTrack}>Resume</Text>
+                              <Feather name="chevron-right" size={14} color={C.orange} style={{ marginLeft: 1 }} />
+                            </View>
+                          )}
+                        </View>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              ))}
             </ScrollView>
           )}
+          </FadeInView>
         </View>
       )}
 
-      {/* ======================= PROFILE TAB ======================= */}
       {activeTab === 'profile' && (
         <View style={styles.screen}>
+          <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide, { flex: 1 }]}>
           <Text style={styles.screenTitle}>Profile</Text>
           <Text style={styles.screenSub}>Your driver account</Text>
 
@@ -1645,6 +1915,10 @@ export default function App() {
               <Text style={styles.statLabel}>Delivered</Text>
             </View>
             <View style={styles.statBox}>
+              <Text style={styles.statNumber}>{activeCount}</Text>
+              <Text style={styles.statLabel}>Active</Text>
+            </View>
+            <View style={styles.statBox}>
               <Text style={styles.statNumber}>{history.length}</Text>
               <Text style={styles.statLabel}>Jobs taken</Text>
             </View>
@@ -1652,31 +1926,34 @@ export default function App() {
 
           <View style={{ flex: 1 }} />
 
-          <TouchableOpacity style={styles.btnLogout} onPress={handleLogout} activeOpacity={0.8}>
+          <PressableScale style={styles.btnLogout} onPress={handleLogout} accessibilityLabel="Log out">
             <Text style={styles.btnLogoutText}>Log out</Text>
-          </TouchableOpacity>
+          </PressableScale>
           <Text style={styles.versionText}>Enso Driver v1.0</Text>
+          </FadeInView>
         </View>
       )}
 
-      {/* ======================= FLOATING TRANSPARENT CURVED NAVBAR ======================= */}
       <View style={styles.navbarWrap} pointerEvents="box-none">
-        <View style={styles.navbar}>
+        <View style={[styles.navbar, webGlass]}>
           {TABS.map((tab) => {
             const active = activeTab === tab.key;
             return (
-              <TouchableOpacity
+              <PressableScale
                 key={tab.key}
                 style={[styles.navItem, active && styles.navItemActive]}
                 onPress={() => {
                   setActiveTab(tab.key);
                   Keyboard.dismiss();
                 }}
-                activeOpacity={0.75}
+                scaleTo={0.9}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={tab.label}
               >
-                <Text style={[styles.navIcon, !active && { opacity: 0.45 }]}>{tab.icon}</Text>
+                <Feather name={tab.icon as any} size={20} color={active ? C.orange : C.gray500} style={{ marginBottom: 3 }} />
                 <Text style={[styles.navLabel, active && styles.navLabelActive]}>{tab.label}</Text>
-              </TouchableOpacity>
+              </PressableScale>
             );
           })}
         </View>
@@ -1685,116 +1962,174 @@ export default function App() {
   );
 }
 
-// ==========================================
-// STYLES — MINIMAL ORANGE & BLACK
-// ==========================================
 const styles = StyleSheet.create({
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: C.black,
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.black },
+  splashMark: {
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 22,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairline,
   },
-  splashLogo: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -1.2,
-  },
-  mapIframe: {
-    width: '100%',
-    height: '100%',
-    borderWidth: 0,
-  },
-
-  // ---------- Auth (dark) ----------
-  authContainer: {
-    flex: 1,
-    backgroundColor: C.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  authCard: { width: '100%', maxWidth: 400 },
-  authLogo: {
-    fontSize: 38,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -1.2,
-    marginBottom: 10,
-  },
-  authSubtitle: {
-    fontSize: 15,
-    color: C.gray400,
-    marginBottom: 36,
-    fontWeight: '500',
-    lineHeight: 22,
-  },
-  inputLabel: {
+  splashLogo: { fontSize: 36, fontWeight: '800', color: C.white, letterSpacing: -1.2 },
+  splashTagline: {
+    marginTop: 18,
+    color: C.gray500,
     fontSize: 12,
     fontWeight: '700',
-    color: C.gray400,
-    letterSpacing: 1,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 8,
+  },
+  mapIframe: { width: '100%', height: '100%', borderWidth: 0 },
+
+  authContainer: { flex: 1, backgroundColor: C.black },
+  authScroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 28, paddingVertical: 60 },
+  authCard: { width: '100%', maxWidth: 420 },
+  authLogo: { fontSize: 38, fontWeight: '800', color: C.white, letterSpacing: -1.3, marginBottom: 12 },
+  authSubtitle: { fontSize: 16, color: C.gray400, marginBottom: 40, fontWeight: '500', lineHeight: 23 },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.gray500,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
   inputBox: {
-    backgroundColor: C.charcoal,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.field,
     width: '100%',
-    paddingVertical: 16,
     paddingHorizontal: 18,
-    borderRadius: 14,
+    borderRadius: 16,
     marginBottom: 18,
-    fontSize: 16,
-    color: C.white,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: 'transparent',
   },
+  inputBoxFocused: { backgroundColor: C.fieldFocus, borderColor: C.orangeBorder },
+  inputField: { flex: 1, paddingVertical: 16, fontSize: 16, color: C.white, fontWeight: '500' },
   vehicleRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
   vehicleChip: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: 'center',
-    backgroundColor: C.charcoal,
+    justifyContent: 'center',
+    backgroundColor: C.field,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
   },
-  vehicleChipActive: {
-    backgroundColor: 'rgba(249,115,22,0.14)',
-    borderColor: 'rgba(249,115,22,0.4)',
-  },
+  vehicleChipActive: { backgroundColor: C.orangeSoft, borderColor: C.orangeBorder },
   vehicleChipText: { color: C.gray400, fontSize: 13, fontWeight: '700' },
   vehicleChipTextActive: { color: C.orange },
   btnPrimary: {
     width: '100%',
     paddingVertical: 17,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: C.orange,
-    marginTop: 6,
+    marginTop: 8,
+    shadowColor: C.orange,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  btnPrimaryText: {
-    color: C.black,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  authToggle: { marginTop: 26, alignItems: 'center' },
+  btnPrimaryLoading: { backgroundColor: C.orangeDark },
+  btnPrimaryText: { color: C.black, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  authToggle: { marginTop: 28, alignItems: 'center' },
   authToggleText: { color: C.gray400, fontSize: 14, fontWeight: '500' },
   authToggleAccent: { color: C.orange, fontWeight: '700' },
   authFooter: {
-    position: 'absolute',
-    bottom: 36,
+    marginTop: 30,
     color: C.gray700,
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 2,
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
 
-  // ---------- App shell ----------
   appRoot: { flex: 1, backgroundColor: C.black },
+
+  btnCta: {
+    width: '100%',
+    paddingVertical: 17,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  btnCtaText: { color: C.black, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  btnOutline: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: C.hairlineStrong,
+  },
+  btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
+
+  routeCard: {
+    backgroundColor: C.glassSheet,
+    borderRadius: 26,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: C.glassBorderStrong,
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 20,
+  },
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
+  modalIconChip: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    backgroundColor: C.orangeSoft,
+    borderWidth: 1,
+    borderColor: C.orangeBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  routeTitle: { fontSize: 20, fontWeight: '800', color: C.white, letterSpacing: -0.3, marginBottom: 3 },
+  routeSub: { fontSize: 13, color: C.gray400, lineHeight: 18 },
+  modalCloseBtn: {
+    marginTop: 16,
+    paddingVertical: 15,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surfaceAlt,
+    borderWidth: 1,
+    borderColor: C.hairline,
+  },
+  modalCloseText: { color: C.white, fontWeight: '700', fontSize: 15 },
+  miniEmpty: {
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    padding: 22,
+    marginVertical: 8,
+    alignItems: 'center',
+  },
+  miniEmptyText: { color: C.gray500, fontSize: 14, fontWeight: '500', textAlign: 'center' },
 
   header: {
     position: 'absolute',
@@ -1807,147 +2142,105 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   logoBadge: {
-    backgroundColor: C.black,
+    backgroundColor: C.glass,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 24,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  logoBadgeText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.4,
-  },
+  logoBadgeText: { fontSize: 16, fontWeight: '800', color: C.white, letterSpacing: -0.4 },
   onlinePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.black,
+    backgroundColor: C.glass,
     paddingHorizontal: 14,
-    borderRadius: 21,
-    height: 42,
+    borderRadius: 22,
+    height: 44,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   onlineDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
   onlineText: { color: C.white, fontSize: 13, fontWeight: '700' },
   avatarBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: C.black,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: C.glass,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.glassBorder,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   avatarBadgeText: { color: C.orange, fontSize: 16, fontWeight: '800' },
 
-  // ---------- AI Relay Route Modal ----------
-  routeCard: { 
-    backgroundColor: C.charcoal, 
-    borderRadius: 20, 
-    padding: 24, 
-    borderWidth: 1, 
-    borderColor: C.line,
-    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 30, shadowOffset: {width: 0, height: 10}, elevation: 20
-  },
-  routeTitle: { fontSize: 22, fontWeight: '800', color: C.white, marginBottom: 8 },
-  routeSub: { fontSize: 14, color: C.gray400, marginBottom: 20, lineHeight: 20 },
-
-  // ---------- Bottom sheet (dark, connected to bottom) ----------
-  sheetWrap: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 5,
-  },
+  sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 },
   bottomSheet: {
     width: '100%',
-    backgroundColor: C.black,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 24,
+    backgroundColor: C.glassSheet,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderTopWidth: 1,
+    borderColor: C.glassBorderStrong,
+    paddingHorizontal: 22,
     paddingTop: 8,
-    paddingBottom: Platform.OS === 'ios' ? 112 : 100,
+    paddingBottom: Platform.OS === 'ios' ? 116 : 104,
     shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: -10 },
-    elevation: 20,
+    shadowOpacity: 0.4,
+    shadowRadius: 34,
+    shadowOffset: { width: 0, height: -12 },
+    elevation: 24,
   },
-  dragHandleTap: { paddingVertical: 10, alignSelf: 'stretch', alignItems: 'center' },
-  dragHandle: {
-    width: 36,
-    height: 4,
-    backgroundColor: C.gray700,
-    borderRadius: 2,
-  },
+  sheetInner: { width: '100%' },
+  sheetInnerWide: { maxWidth: 600, alignSelf: 'center' },
+  dragHandleTap: { paddingVertical: 12, alignSelf: 'stretch', alignItems: 'center' },
+  dragHandle: { width: 40, height: 5, backgroundColor: C.gray700, borderRadius: 3 },
   collapsedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
+    backgroundColor: C.surface,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.line,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    borderColor: C.hairline,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
   },
-  collapsedText: {
-    flex: 1,
-    color: C.white,
-    fontSize: 15,
-    fontWeight: '700',
-    marginLeft: 12,
-  },
+  collapsedText: { flex: 1, color: C.white, fontSize: 15, fontWeight: '700', marginLeft: 12 },
   collapsedAction: { color: C.orange, fontSize: 15, fontWeight: '800' },
-  pulseDotSmall: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: C.orange,
-  },
+  pulseDotSmall: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.orange },
+  dotOrange: { width: 11, height: 11, borderRadius: 6, backgroundColor: C.orange },
+  dotWhite: { width: 11, height: 11, borderRadius: 3, backgroundColor: C.white },
 
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sheetTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.5,
-  },
+  sheetTitle: { fontSize: 23, fontWeight: '800', color: C.white, letterSpacing: -0.5 },
+  offlineSub: { color: C.gray400, fontSize: 14, lineHeight: 21, marginTop: 10, marginBottom: 20 },
+  locationWarn: { color: C.gray500, fontSize: 12, marginTop: 14, textAlign: 'center' },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   relayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    backgroundColor: C.orangeSoft,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.25)',
+    borderColor: C.orangeBorder,
   },
-  relayDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: C.orange,
-    marginRight: 7,
-  },
+  relayDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginRight: 7 },
   relayBadgeText: {
     color: C.orange,
     fontSize: 11,
@@ -1956,353 +2249,285 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  offlineSub: {
-    color: C.gray400,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-    marginBottom: 20,
+  jobCard: {
+    backgroundColor: C.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    padding: 16,
+    marginBottom: 12,
   },
-  locationWarn: {
-    color: C.gray500,
-    fontSize: 12,
+  jobTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  jobItem: { color: C.white, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 10 },
+  jobPrice: { color: C.white, fontSize: 18, fontWeight: '800' },
+  jobDist: { color: C.orange, fontSize: 13, fontWeight: '800' },
+  jobRoute: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 2 },
+  jobBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  jobTime: { color: C.gray500, fontSize: 12, fontWeight: '500' },
+  countdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 12,
-    textAlign: 'center',
+    backgroundColor: C.orangeSoft,
+    borderRadius: 10,
+    paddingVertical: 7,
   },
+  countdownText: { color: C.orange, fontSize: 12, fontWeight: '700' },
+  declineBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: C.hairlineStrong,
+    paddingVertical: 12,
+    borderRadius: 14,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declineBtnText: { color: C.gray400, fontSize: 14, fontWeight: '700' },
+  acceptBtnFlex: {
+    backgroundColor: C.orange,
+    paddingVertical: 12,
+    borderRadius: 14,
+    flex: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: C.orange,
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
+  },
+  acceptBtn: {
+    backgroundColor: C.orange,
+    paddingVertical: 12,
+    borderRadius: 14,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptBtnText: { color: C.black, fontSize: 14, fontWeight: '800' },
 
-  scanWrap: { alignItems: 'center', paddingVertical: 6 },
-  scanTitle: { color: C.white, fontSize: 17, fontWeight: '800', marginTop: 10 },
+  scanWrap: { alignItems: 'center', paddingVertical: 10 },
+  scanTitle: { color: C.white, fontSize: 17, fontWeight: '800', marginTop: 12 },
   scanSub: {
     color: C.gray400,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 19,
     marginTop: 6,
-    marginBottom: 18,
+    marginBottom: 20,
     maxWidth: 280,
   },
+  pulseWrap: { width: 56, height: 56, justifyContent: 'center', alignItems: 'center' },
+  pulseRing: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: C.orangeSoftStrong,
+  },
+  pulseDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.orange },
 
-  // Available job cards
-  jobCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 16,
-    marginBottom: 12,
-  },
-  jobTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  jobItem: { color: C.white, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 10 },
-  jobPrice: { color: C.white, fontSize: 18, fontWeight: '800' },
-  jobDist: { color: C.orange, fontSize: 13, fontWeight: '800' },
-  jobRoute: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 2 },
-  jobBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  jobTime: { color: C.gray500, fontSize: 12, fontWeight: '500' },
-  
-  declineBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: C.gray700,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderRadius: 12,
-    flex: 1,
-    alignItems: 'center',
-  },
-  declineBtnText: { color: C.gray400, fontSize: 14, fontWeight: '700' },
-  acceptBtnFlex: {
-    backgroundColor: C.orange,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderRadius: 12,
-    flex: 1.5,
-    alignItems: 'center',
-  },
-  
-  acceptBtn: {
-    backgroundColor: C.orange,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderRadius: 12,
-    minWidth: 88,
-    alignItems: 'center',
-  },
-  acceptBtnText: { color: C.black, fontSize: 14, fontWeight: '800' },
-
-  // Stepper
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
-  },
-  stepItem: { alignItems: 'center', width: 76 },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  stepItem: { alignItems: 'center', width: 80 },
   stepDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: C.charcoal,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: C.surfaceAlt,
     borderWidth: 1.5,
     borderColor: C.gray700,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 7,
   },
   stepDotDone: { backgroundColor: C.orange, borderColor: C.orange },
   stepDotCheck: { color: C.black, fontSize: 11, fontWeight: '900' },
   stepLabel: { color: C.gray500, fontSize: 10, fontWeight: '700' },
-  stepLine: {
-    flex: 1,
-    height: 2,
-    backgroundColor: C.gray700,
-    marginBottom: 18,
-    maxWidth: 40,
-  },
+  stepLine: { flex: 1, height: 2, backgroundColor: C.gray700, marginBottom: 19, maxWidth: 44 },
 
-  // Active job status
-  statusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  pulseWrap: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(249, 115, 22, 0.25)',
-  },
-  pulseDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: C.orange,
-  },
+  statusHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   statusIcon: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: 16,
     backgroundColor: C.orange,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
   },
-  statusIconText: {
-    color: C.black,
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  statusTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.3,
-    marginBottom: 4,
-  },
-  statusSubtitle: {
-    fontSize: 13,
-    color: C.gray400,
-    fontWeight: '500',
-    lineHeight: 18,
-  },
+  statusIconText: { color: C.black, fontSize: 20, fontWeight: '800' },
+  statusTitle: { fontSize: 20, fontWeight: '800', color: C.white, letterSpacing: -0.3, marginBottom: 4 },
+  statusSubtitle: { fontSize: 13, color: C.gray400, fontWeight: '500', lineHeight: 18 },
 
-  // 🚚 Animated road
   roadScene: {
-    height: 64,
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
+    height: 66,
+    backgroundColor: C.surface,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     marginBottom: 14,
     overflow: 'hidden',
     justifyContent: 'center',
   },
-  roadLineWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '68%',
-    height: 4,
-    overflow: 'hidden',
-  },
+  roadLineWrap: { position: 'absolute', left: 0, right: 0, top: '68%', height: 4, overflow: 'hidden' },
   dashRow: { flexDirection: 'row' },
-  dash: {
-    width: 22,
-    height: 3,
-    backgroundColor: C.gray700,
-    borderRadius: 2,
-    marginRight: 18,
-  },
-  truck: {
-    position: 'absolute',
-    left: '36%',
-    top: 8,
-    fontSize: 30,
-  },
-  roadPin: {
-    position: 'absolute',
-    right: 14,
-    top: 12,
-    fontSize: 18,
-  },
+  dash: { width: 22, height: 3, backgroundColor: C.gray700, borderRadius: 2, marginRight: 18 },
+  truck: { position: 'absolute', left: '36%', top: 18, fontSize: 30 },
+  roadPin: { position: 'absolute', right: 16, top: 14, fontSize: 18 },
 
   summaryCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
+    backgroundColor: C.surface,
+    borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     marginBottom: 16,
   },
   summaryRow: { flexDirection: 'row', alignItems: 'center' },
   summaryIcon: { fontSize: 13, width: 14, textAlign: 'center' },
-  summaryText: {
-    color: C.white,
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 12,
-    flex: 1,
-  },
+  summaryText: { color: C.white, fontSize: 15, fontWeight: '600', marginLeft: 12, flex: 1 },
   distText: { color: C.orange, fontSize: 12, fontWeight: '800', marginLeft: 8 },
-
-  connectorLine: { width: 2, height: 16, backgroundColor: C.gray700, marginLeft: 8, marginVertical: 6 },
-  dotOrange: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.orange },
-  dotWhite: { width: 10, height: 10, borderRadius: 2, backgroundColor: C.white },
+  connectorLine: { width: 2, height: 16, backgroundColor: C.gray700, marginLeft: 9, marginVertical: 6 },
 
   actionRow: { flexDirection: 'row', gap: 10 },
   btnNavigate: {
     flex: 1,
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: C.gray700,
+    borderColor: C.hairlineStrong,
   },
   btnNavigateText: { color: C.white, fontSize: 14, fontWeight: '700' },
   btnCtaFlex: {
     flex: 2,
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
   },
-  releaseBtn: { alignItems: 'center', marginTop: 14 },
-  releaseText: { color: C.gray500, fontSize: 13, fontWeight: '600' },
-
-  poolBtn: {
-    backgroundColor: 'rgba(249,115,22,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.4)',
-    borderRadius: 14,
-    paddingVertical: 14,
+  releaseBtn: {
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: C.hairlineStrong,
+  },
+  releaseText: { color: C.gray400, fontSize: 13, fontWeight: '700' },
+  poolBtn: {
+    backgroundColor: C.orangeSoft,
+    borderWidth: 1,
+    borderColor: C.orangeBorder,
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 12,
   },
   poolBtnText: { color: C.orange, fontSize: 13, fontWeight: '700' },
 
-  // ---------- Activity / Profile screens ----------
-  screen: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: C.black,
+  screen: { ...StyleSheet.absoluteFillObject, backgroundColor: C.black, zIndex: 8 },
+  screenInner: {
+    flex: 1,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'ios' ? 68 : 52,
-    zIndex: 8,
   },
-  screenTitle: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.8,
+  screenInnerWide: { maxWidth: 680, alignSelf: 'center', width: '100%' },
+  screenTitle: { fontSize: 30, fontWeight: '800', color: C.white, letterSpacing: -0.8 },
+  screenSub: { fontSize: 14, color: C.gray500, fontWeight: '500', marginTop: 4, marginBottom: 20 },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.field,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: 14,
+    marginBottom: 14,
   },
-  screenSub: {
-    fontSize: 14,
+  searchBarFocused: { backgroundColor: C.fieldFocus, borderColor: C.orangeBorder },
+  searchIcon: { fontSize: 14, marginRight: 10, opacity: 0.7 },
+  searchInput: { flex: 1, paddingVertical: 13, fontSize: 15, color: C.white, fontWeight: '500' },
+  searchClear: { color: C.gray500, fontSize: 14, paddingLeft: 8 },
+  filterRow: { flexGrow: 0, marginBottom: 16 },
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: C.field,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    marginRight: 8,
+  },
+  filterChipActive: { backgroundColor: C.orangeSoft, borderColor: C.orangeBorder },
+  filterChipText: { color: C.gray400, fontSize: 13, fontWeight: '700' },
+  filterChipTextActive: { color: C.orange },
+  groupLabel: {
     color: C.gray500,
-    fontWeight: '500',
-    marginTop: 4,
-    marginBottom: 22,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 10,
   },
 
-  emptyWrap: {
-    flex: 1,
+  emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 140 },
+  emptyBadge: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: C.surfaceAlt,
+    borderWidth: 1,
+    borderColor: C.hairline,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 140,
+    marginBottom: 18,
   },
   emptyEmoji: { fontSize: 44, marginBottom: 14 },
-  emptyTitle: { color: C.white, fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  emptySub: {
-    color: C.gray500,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 280,
-  },
+  emptyTitle: { color: C.white, fontSize: 18, fontWeight: '800', marginBottom: 8 },
+  emptySub: { color: C.gray500, fontSize: 14, textAlign: 'center', lineHeight: 20, maxWidth: 280 },
 
   historyCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
+    backgroundColor: C.surface,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     padding: 16,
     marginBottom: 12,
   },
-  historyTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  historyItem: {
-    color: C.white,
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: 10,
-  },
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  statusPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  historyDest: {
-    color: C.gray400,
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 10,
-  },
+  historyTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  historyItem: { color: C.white, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 10 },
+  statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  statusPillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  historyDest: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 12 },
+  historyBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   historyDate: { color: C.gray500, fontSize: 12, fontWeight: '500' },
+  historyTrack: { color: C.orange, fontSize: 13, fontWeight: '800' },
+  skeleton: { backgroundColor: C.gray700, borderRadius: 8 },
 
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderRadius: 18,
+    backgroundColor: C.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   profileAvatar: {
     width: 56,
@@ -2314,51 +2539,43 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   profileAvatarText: { color: C.black, fontSize: 24, fontWeight: '800' },
-  profileEmail: { color: C.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  profileEmail: { color: C.white, fontSize: 17, fontWeight: '700', marginBottom: 4 },
   profileJoined: { color: C.gray500, fontSize: 13, fontWeight: '500' },
   vehicleBadge: {
-    backgroundColor: 'rgba(249,115,22,0.12)',
+    backgroundColor: C.orangeSoft,
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.25)',
+    borderColor: C.orangeBorder,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 12,
     marginLeft: 10,
   },
   vehicleBadgeText: { color: C.orange, fontSize: 12, fontWeight: '800' },
-
-  statsRow: { flexDirection: 'row', gap: 12 },
+  statsRow: { flexDirection: 'row', gap: 10 },
   statBox: {
     flex: 1,
-    backgroundColor: C.charcoal,
+    backgroundColor: C.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     paddingVertical: 20,
     alignItems: 'center',
   },
-  statNumber: { color: C.orange, fontSize: 28, fontWeight: '800', marginBottom: 4 },
-  statLabel: { color: C.gray500, fontSize: 12, fontWeight: '600' },
-
+  statNumber: { color: C.orange, fontSize: 26, fontWeight: '800', marginBottom: 4 },
+  statLabel: { color: C.gray500, fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
   btnLogout: {
     width: '100%',
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: C.gray700,
+    borderColor: 'rgba(248,113,113,0.3)',
     marginBottom: 12,
   },
-  btnLogoutText: { color: C.white, fontSize: 15, fontWeight: '700' },
-  versionText: {
-    color: C.gray700,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 120,
-  },
+  btnLogoutText: { color: C.danger, fontSize: 15, fontWeight: '700' },
+  versionText: { color: C.gray700, fontSize: 12, fontWeight: '600', textAlign: 'center', marginBottom: 120 },
 
-  // ---------- Floating transparent curved navbar ----------
   navbarWrap: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 26 : 16,
@@ -2369,58 +2586,22 @@ const styles = StyleSheet.create({
   },
   navbar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(10, 10, 10, 0.88)',
+    backgroundColor: C.glassStrong,
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: C.glassBorderStrong,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 9,
     gap: 4,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 16,
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 18,
   },
-  navItem: {
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 22,
-  },
-  navItemActive: {
-    backgroundColor: 'rgba(249, 115, 22, 0.14)',
-  },
+  navItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 22 },
+  navItemActive: { backgroundColor: C.orangeSoftStrong },
   navIcon: { fontSize: 18, marginBottom: 2 },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: C.gray500,
-  },
+  navLabel: { fontSize: 10, fontWeight: '600', color: C.gray500 },
   navLabelActive: { color: C.orange, fontWeight: '800' },
-
-  // Buttons
-  btnCta: {
-    width: '100%',
-    paddingVertical: 17,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: C.orange,
-  },
-  btnCtaText: {
-    color: C.black,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  btnOutline: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: C.gray700,
-  },
-  btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
 });

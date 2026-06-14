@@ -18,6 +18,8 @@ import {
   Linking,
   Image,
   Vibration,
+  Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import {
   createUserWithEmailAndPassword,
@@ -42,18 +44,74 @@ import { auth, db } from './config/firebaseConfig';
 
 const { height } = Dimensions.get('window');
 
-
+// ==========================================
+// DESIGN TOKENS — ORANGE & BLACK · PREMIUM DARK "LIQUID GLASS"
+// The brand identity (orange #F97316 + black #0A0A0A) is preserved exactly.
+// Everything around it is elevated: layered charcoal surfaces, hairline
+// borders, frosted translucent glass, and a single warm accent. No gradients —
+// solid fills and translucency only.
+// ==========================================
 const C = {
+  // ---- Brand (unchanged) ----
   orange: '#F97316',
   orangeDark: '#EA580C',
+  orangeSoft: 'rgba(249,115,22,0.12)',
+  orangeSoftStrong: 'rgba(249,115,22,0.18)',
+  orangeBorder: 'rgba(249,115,22,0.30)',
+  orangeGlow: 'rgba(249,115,22,0.35)',
+
   black: '#0A0A0A',
   charcoal: '#171717',
   line: '#262626',
   gray700: '#404040',
+  gray600: '#525252',
   gray500: '#737373',
   gray400: '#A3A3A3',
   white: '#FFFFFF',
+
+  // ---- Extended dark surfaces (added depth) ----
+  surface: '#141416',
+  surfaceAlt: '#1B1B1E',
+  field: 'rgba(255,255,255,0.055)',
+  fieldFocus: 'rgba(255,255,255,0.09)',
+  hairline: 'rgba(255,255,255,0.08)',
+  hairlineStrong: 'rgba(255,255,255,0.14)',
+  textHi: '#FAFAFA',
+  danger: '#F87171',
+
+  // ---- Glass surfaces ----
+  glass: 'rgba(18,18,20,0.62)',
+  glassStrong: 'rgba(16,16,18,0.80)',
+  glassSheet: 'rgba(13,13,15,0.84)',
+  glassBorder: 'rgba(255,255,255,0.10)',
+  glassBorderStrong: 'rgba(255,255,255,0.16)',
+  shadow: '#000000',
 };
+
+// Web-only frosted blur. No-op on native (translucent bg + hairline still reads
+// as frosted). For true native blur, add `expo-blur` and wrap these surfaces in
+// <BlurView tint="dark"> — see notes.
+const webGlass: any =
+  Platform.OS === 'web'
+    ? { backdropFilter: 'blur(22px) saturate(150%)', WebkitBackdropFilter: 'blur(22px) saturate(150%)' }
+    : null;
+
+// Minimal dark Google-map style (Android). iOS uses Apple Maps and ignores this.
+const MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0f0f10' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#6b6b6b' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0a0a' }] },
+  { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#141716' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1c1c1e' }] },
+  { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2a2a2d' }] },
+  { featureType: 'road.local', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#05080d' }] },
+];
 
 // Fallback pickup point if GPS is unavailable (Guwahati)
 const FALLBACK_COORDS = { latitude: 26.1445, longitude: 91.7362 };
@@ -75,7 +133,7 @@ const HIGHWAY_STOPS = [
   { name: 'Sivasagar', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 26.9826, longitude: 94.6425 },
   { name: 'Dibrugarh', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4728, longitude: 94.912 },
   { name: 'Tinsukia', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4922, longitude: 95.3468 },
-  
+
   // ---- NH-6 · Guwahati – Shillong line ----
   { name: 'Khanapara (Guwahati)', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 26.1158, longitude: 91.8266 },
   { name: 'Jorabat Junction ', group: 'NH-6 · Guwahati – Shillong', tag: 'NH-27 / NH-6 junction', latitude: 26.1147, longitude: 91.8859 },
@@ -133,6 +191,17 @@ const notify = (title: string, message?: string) => {
   }
 };
 
+// Light, tasteful haptic for key presses. Android-only via the built-in
+// Vibration module to avoid the heavy default iOS buzz; for proper Taptic
+// feedback on iOS add `expo-haptics`.
+const haptic = () => {
+  if (Platform.OS === 'android') {
+    try {
+      Vibration.vibrate(8);
+    } catch (e) {}
+  }
+};
+
 // "12 Jun, 4:30 PM" — works everywhere, no Intl needed
 const formatDate = (ts: any) => {
   if (!ts?.toDate) return 'Just now';
@@ -151,7 +220,7 @@ const SEARCH_TIPS = [
   'Your request is live and visible to nearby drivers.',
 ];
 
-
+// Copy for each shipment status (the driver app will update `status`)
 const STATUS_COPY: Record<string, { title: string; subtitle: string }> = {
   searching: {
     title: 'Finding your driver\u2026',
@@ -177,12 +246,16 @@ const STATUS_COPY: Record<string, { title: string; subtitle: string }> = {
 
 // Badge colors for the Activity list
 const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
-  searching: { label: 'Searching', color: C.orange, bg: 'rgba(249,115,22,0.12)' },
-  accepted: { label: 'Driver on way', color: C.orange, bg: 'rgba(249,115,22,0.12)' },
-  picked_up: { label: 'In transit', color: C.orange, bg: 'rgba(249,115,22,0.12)' },
+  searching: { label: 'Searching', color: C.orange, bg: C.orangeSoft },
+  accepted: { label: 'Driver on way', color: C.orange, bg: C.orangeSoft },
+  picked_up: { label: 'In transit', color: C.orange, bg: C.orangeSoft },
   delivered: { label: 'Delivered', color: C.white, bg: 'rgba(255,255,255,0.08)' },
   cancelled: { label: 'Cancelled', color: C.gray500, bg: 'rgba(115,115,115,0.12)' },
 };
+
+// Ordered shipment lifecycle for the progress tracker
+const PROGRESS_STEPS = ['searching', 'accepted', 'picked_up', 'delivered'];
+const PROGRESS_LABELS = ['Request', 'Matched', 'Pickup', 'Delivered'];
 
 const TABS = [
   { key: 'home', icon: '🏠', label: 'Home' },
@@ -193,6 +266,102 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key'];
 type LatLng = { latitude: number; longitude: number };
+type ActivityFilter = 'all' | 'active' | 'delivered' | 'cancelled';
+
+// ==========================================
+// REUSABLE MICRO-INTERACTION PRIMITIVES
+// ==========================================
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Spring-scale pressable used for premium tactile feedback on buttons/cards.
+// Applies the style + transform to the touchable itself so flex layouts work.
+const PressableScale = ({
+  style,
+  children,
+  onPress,
+  disabled,
+  hitSlop,
+  accessibilityLabel,
+  accessibilityRole = 'button',
+  accessibilityState,
+  scaleTo = 0.97,
+  haptics = true,
+  ...rest
+}: any) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressIn = () =>
+    Animated.spring(scale, { toValue: scaleTo, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  const pressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+  return (
+    <AnimatedPressable
+      onPress={(e: any) => {
+        if (disabled) return;
+        if (haptics) haptic();
+        onPress?.(e);
+      }}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      disabled={disabled}
+      hitSlop={hitSlop}
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
+      style={[style, { transform: [{ scale }] }]}
+      {...rest}
+    >
+      {children}
+    </AnimatedPressable>
+  );
+};
+
+// Shimmering skeleton block for loading states.
+const Shimmer = ({ style }: any) => {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(t, { toValue: 1, duration: 1050, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(t, { toValue: 0, duration: 1050, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  const opacity = t.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.9] });
+  return <Animated.View style={[styles.skeleton, { opacity }, style]} />;
+};
+
+// Skeleton card matching the Activity list silhouette.
+const SkeletonCard = () => (
+  <View style={styles.historyCard}>
+    <View style={styles.historyTop}>
+      <Shimmer style={{ width: '52%', height: 16, borderRadius: 6 }} />
+      <Shimmer style={{ width: 74, height: 22, borderRadius: 11 }} />
+    </View>
+    <Shimmer style={{ width: '78%', height: 12, borderRadius: 6, marginBottom: 14 }} />
+    <Shimmer style={{ width: '38%', height: 11, borderRadius: 6 }} />
+  </View>
+);
+
+// Fade + lift mount animation for page transitions.
+const FadeInView = ({ children, style }: any) => {
+  const a = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(a, { toValue: 1, duration: 360, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        { opacity: a, transform: [{ translateY: a.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] },
+        style,
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
 
 export default function App() {
   // --- AUTH STATE ---
@@ -228,11 +397,22 @@ export default function App() {
   const [history, setHistory] = useState<any[]>([]);
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
+  // Presentation-only state powering the upgraded Activity / Stops explorers
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [activitySearch, setActivitySearch] = useState('');
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
+  const [stopSearch, setStopSearch] = useState('');
+  const [inputFocus, setInputFocus] = useState<string | null>(null);
+
   // Real location
   const [coords, setCoords] = useState<LatLng | null>(null);
   const [locationDenied, setLocationDenied] = useState(false);
   const mapRef = useRef<any>(null);
   const mapIframeRef = useRef<any>(null);
+
+  // Responsive sizing (mobile → tablet → desktop / web)
+  const { width: winW } = useWindowDimensions();
+  const isWide = winW >= 720;
 
   // Animations / rotating tips
   const pulse = useRef(new Animated.Value(1)).current;
@@ -410,8 +590,10 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setHistory([]);
+      setHistoryLoading(false);
       return;
     }
+    setHistoryLoading(true);
     const q = query(collection(db, 'Packages'), where('sender_id', '==', user.uid), limit(50));
     const unsub = onSnapshot(
       q,
@@ -421,8 +603,11 @@ export default function App() {
           (a, b) => (b.created_at?.toMillis?.() ?? Date.now()) - (a.created_at?.toMillis?.() ?? 0)
         );
         setHistory(rows);
+        setHistoryLoading(false);
       },
-      () => {}
+      () => {
+        setHistoryLoading(false);
+      }
     );
     return unsub;
   }, [user]);
@@ -546,15 +731,15 @@ export default function App() {
             {
               role: 'user',
               content: [
-                { 
-                  type: 'text', 
-                  text: 'Analyze the primary object in this image for logistics dispatch. Identify what the object is, and give a short, exact estimation of its dimensions and volumetric weight. Format strictly like: "[Item Name]: [L]x[W]x[H]cm (Vol. [X]kg)". Keep it to exactly one short line. Do not include conversational text.' 
+                {
+                  type: 'text',
+                  text: 'Analyze the primary object in this image for logistics dispatch. Identify what the object is, and give a short, exact estimation of its dimensions and volumetric weight. Format strictly like: "[Item Name]: [L]x[W]x[H]cm (Vol. [X]kg)". Keep it to exactly one short line. Do not include conversational text.'
                 },
-                { 
-                  type: 'image_url', 
-                  image_url: { 
-                    url: base64Image 
-                  } 
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: base64Image
+                  }
                 }
               ]
             }
@@ -563,7 +748,7 @@ export default function App() {
           max_tokens: 50
         })
       });
-      
+
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Groq API Error ${response.status}: ${errText}`);
@@ -622,7 +807,7 @@ export default function App() {
       }
       return;
     }
-    
+
     // If Native App, animate MapView
     if (!mapRef.current) return;
     if (a && b) {
@@ -633,6 +818,13 @@ export default function App() {
     } else if (a) {
       mapRef.current.animateToRegion({ ...a, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 600);
     }
+  };
+
+  // Re-center the map on the user's current location (floating locate control)
+  const recenter = () => {
+    const target = coords ?? FALLBACK_COORDS;
+    haptic();
+    focusMap(target);
   };
 
   // User tapped a highway-stop suggestion while typing
@@ -659,7 +851,7 @@ export default function App() {
     const start =
       (which === 'pickup' ? pickupPoint : destPoint) ?? coords ?? FALLBACK_COORDS;
     setPendingCenter(start);
-    
+
     // Only animate region if it's the native map view
     if (Platform.OS !== 'web') {
       mapRef.current?.animateToRegion(
@@ -676,12 +868,12 @@ export default function App() {
   // Confirm the pin where the map is centered
   const confirmPin = async () => {
     if (!pickingMode || !pendingCenter) return;
-    
+
     // On Web, reverse geocode isn't supported natively, provide a highly accurate generated tag
     const label =
       (await reverseGeocode(pendingCenter)) ??
       `Pinned Highway Node (${pendingCenter.latitude.toFixed(4)}, ${pendingCenter.longitude.toFixed(4)})`;
-      
+
     if (pickingMode === 'pickup') {
       setPickupPoint(pendingCenter);
       setPickupText(label);
@@ -710,7 +902,7 @@ export default function App() {
         const lon = parseFloat(data[0].lon);
         const pt = { latitude: lat, longitude: lon };
         const locationName = data[0].display_name.split(',')[0]; // Get the cleanest short name
-        
+
         if (which === 'pickup') {
           setPickupPoint(pt);
           setPickupText(locationName);
@@ -837,10 +1029,14 @@ export default function App() {
   if (isInitializing) {
     return (
       <View style={styles.center}>
-        <Text style={styles.splashLogo}>
-          Enso<Text style={{ color: C.orange }}>.</Text>
-        </Text>
-        <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 24 }} />
+        <StatusBar barStyle="light-content" backgroundColor={C.black} />
+        <View style={styles.splashMark}>
+          <Text style={styles.splashLogo}>
+            Enso<Text style={{ color: C.orange }}>.</Text>
+          </Text>
+        </View>
+        <ActivityIndicator size="small" color={C.orange} style={{ marginTop: 28 }} />
+        <Text style={styles.splashTagline}>Relay logistics network</Text>
       </View>
     );
   }
@@ -864,38 +1060,51 @@ export default function App() {
           </Text>
 
           <Text style={styles.inputLabel}>Email</Text>
-          <TextInput
-            style={styles.inputBox}
-            placeholder="you@example.com"
-            placeholderTextColor={C.gray500}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-            selectionColor={C.orange}
-            value={email}
-            onChangeText={setEmail}
-            // @ts-ignore
-            outlineStyle="none"
-          />
+          <View style={[styles.inputBox, inputFocus === 'email' && styles.inputBoxFocused]}>
+            <Text style={styles.inputGlyph}>✉</Text>
+            <TextInput
+              style={styles.inputField}
+              placeholder="you@example.com"
+              placeholderTextColor={C.gray500}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              selectionColor={C.orange}
+              value={email}
+              onChangeText={setEmail}
+              onFocus={() => setInputFocus('email')}
+              onBlur={() => setInputFocus((f) => (f === 'email' ? null : f))}
+              accessibilityLabel="Email address"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+          </View>
 
           <Text style={styles.inputLabel}>Password</Text>
-          <TextInput
-            style={styles.inputBox}
-            placeholder="••••••••"
-            placeholderTextColor={C.gray500}
-            secureTextEntry
-            selectionColor={C.orange}
-            value={password}
-            onChangeText={setPassword}
-            // @ts-ignore
-            outlineStyle="none"
-          />
+          <View style={[styles.inputBox, inputFocus === 'password' && styles.inputBoxFocused]}>
+            <Text style={styles.inputGlyph}>⚷</Text>
+            <TextInput
+              style={styles.inputField}
+              placeholder="••••••••"
+              placeholderTextColor={C.gray500}
+              secureTextEntry
+              selectionColor={C.orange}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={() => setInputFocus('password')}
+              onBlur={() => setInputFocus((f) => (f === 'password' ? null : f))}
+              accessibilityLabel="Password"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+          </View>
 
-          <TouchableOpacity
-            style={[styles.btnPrimary, authLoading && { backgroundColor: C.orangeDark }]}
+          <PressableScale
+            style={[styles.btnPrimary, authLoading && styles.btnPrimaryLoading]}
             onPress={handleAuthentication}
             disabled={authLoading}
-            activeOpacity={0.85}
+            accessibilityLabel={isLoginMode ? 'Log in' : 'Create account'}
+            accessibilityState={{ disabled: authLoading }}
           >
             {authLoading ? (
               <ActivityIndicator color={C.black} />
@@ -904,12 +1113,14 @@ export default function App() {
                 {isLoginMode ? 'Log in' : 'Create account'}
               </Text>
             )}
-          </TouchableOpacity>
+          </PressableScale>
 
           <TouchableOpacity
             style={styles.authToggle}
             onPress={() => setIsLoginMode(!isLoginMode)}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={isLoginMode ? 'Switch to sign up' : 'Switch to log in'}
           >
             <Text style={styles.authToggleText}>
               {isLoginMode ? (
@@ -926,7 +1137,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.authFooter}>Fast deliveries. Fair prices.</Text>
+        <Text style={styles.authFooter}>Fast deliveries · Fair prices</Text>
       </KeyboardAvoidingView>
     );
   }
@@ -941,6 +1152,8 @@ export default function App() {
   const isFinished = status === 'delivered' || status === 'cancelled';
   const userInitial = (user.email?.[0] ?? 'U').toUpperCase();
   const deliveredCount = history.filter((h) => h.status === 'delivered').length;
+  const activeCount = history.filter((h) => ACTIVE_STATUSES.includes(h.status)).length;
+  const stepIndex = status ? PROGRESS_STEPS.indexOf(status) : -1;
 
   // Highway-stop suggestions while typing (deduped by name)
   const suggQuery = focusField === 'pickup' ? pickupText : focusField === 'dest' ? destination : '';
@@ -953,6 +1166,60 @@ export default function App() {
           .slice(0, 4)
       : [];
 
+  // ---- Activity explorer: client-side search + filter + date grouping ----
+  const activityQuery = activitySearch.trim().toLowerCase();
+  const filteredHistory = history.filter((h) => {
+    const matchesQuery =
+      !activityQuery ||
+      [h.item_name, h.destination_name, h.pickup_name]
+        .filter(Boolean)
+        .some((s) => String(s).toLowerCase().includes(activityQuery));
+    const matchesFilter =
+      activityFilter === 'all'
+        ? true
+        : activityFilter === 'active'
+        ? ACTIVE_STATUSES.includes(h.status)
+        : activityFilter === 'delivered'
+        ? h.status === 'delivered'
+        : h.status === 'cancelled';
+    return matchesQuery && matchesFilter;
+  });
+
+  const dateGroupOf = (ts: any): string => {
+    const d = ts?.toDate ? ts.toDate() : null;
+    if (!d) return 'Earlier';
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const t = d.getTime();
+    if (t >= startToday) return 'Today';
+    if (t >= startToday - 86400000) return 'Yesterday';
+    if (t >= startToday - 7 * 86400000) return 'This week';
+    return 'Earlier';
+  };
+  const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
+  const groupedHistory = GROUP_ORDER.map((g) => ({
+    group: g,
+    rows: filteredHistory.filter((h) => dateGroupOf(h.created_at) === g),
+  })).filter((s) => s.rows.length > 0);
+
+  const ACTIVITY_FILTERS: { key: ActivityFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'active', label: 'Active' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'cancelled', label: 'Cancelled' },
+  ];
+
+  // ---- Stops explorer: client-side search across the relay network ----
+  const stopQuery = stopSearch.trim().toLowerCase();
+  const filteredStops = HIGHWAY_STOPS.filter(
+    (s) =>
+      !stopQuery ||
+      s.name.toLowerCase().includes(stopQuery) ||
+      s.group.toLowerCase().includes(stopQuery) ||
+      s.tag.toLowerCase().includes(stopQuery)
+  );
+  const visibleGroups = LINE_GROUPS.filter((g) => filteredStops.some((s) => s.group === g));
+
   // Generate Leaflet Interactive Map HTML for Web
   const leafletMapHtml = `
     <!DOCTYPE html>
@@ -962,28 +1229,37 @@ export default function App() {
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
       <style>
-        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; }
+        body, html, #map { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background:#0a0a0a; }
         .center-pin {
-          position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%);
-          font-size: 38px; z-index: 1000; pointer-events: none; display: none;
-          text-shadow: 0 4px 10px rgba(0,0,0,0.4);
+          position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+          z-index: 1000; pointer-events: none; display: none;
         }
         .center-pin.active { display: block; }
+        .center-pin .dot {
+          width: 24px; height: 24px; border-radius: 50%;
+          background: #F97316; border: 3px solid #0a0a0a;
+          box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+        }
+        .center-pin .halo {
+          position: absolute; top: 50%; left: 50%; width: 56px; height: 56px;
+          transform: translate(-50%, -50%); border-radius: 50%;
+          background: rgba(249,115,22,0.20);
+        }
       </style>
     </head>
     <body>
       <div id="map"></div>
-      <div id="pin" class="center-pin">📍</div>
+      <div id="pin" class="center-pin"><div class="halo"></div><div class="dot"></div></div>
       <script>
         const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([${mapCenter.latitude}, ${mapCenter.longitude}], 14);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
 
         let pickupMarker = null;
         let dropMarker = null;
         let driverMarker = null;
-        const driverIcon = L.divIcon({ html: '<div style="font-size:24px; background:white; border-radius:50%; width:30px; height:30px; display:flex; justify-content:center; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.3)">🛻</div>', className: '', iconSize: [30, 30], iconAnchor: [15, 15] });
-        const orangeIcon = L.divIcon({ html: '<div style="font-size:24px">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
-        const blackIcon = L.divIcon({ html: '<div style="font-size:24px; filter: grayscale(1)">📍</div>', className: '', iconSize: [24, 24], iconAnchor: [12, 24] });
+        const driverIcon = L.divIcon({ html: '<div style="font-size:18px; background:#fff; border-radius:50%; width:34px; height:34px; display:flex; justify-content:center; align-items:center; box-shadow:0 6px 16px rgba(0,0,0,0.5)">🛻</div>', className: '', iconSize: [34, 34], iconAnchor: [17, 17] });
+        const orangeIcon = L.divIcon({ html: '<div style="width:22px; height:22px; border-radius:50%; background:#F97316; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
+        const blackIcon = L.divIcon({ html: '<div style="width:20px; height:20px; border-radius:6px; background:#fff; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
 
         // Update React on Drag
         map.on('move', () => {
@@ -1025,7 +1301,7 @@ export default function App() {
   return (
     <View style={styles.appRoot}>
       <StatusBar
-        barStyle={activeTab === 'home' ? 'dark-content' : 'light-content'}
+        barStyle="light-content"
         backgroundColor="transparent"
         translucent
       />
@@ -1045,6 +1321,7 @@ export default function App() {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
+          customMapStyle={MAP_STYLE}
           initialRegion={{
             ...mapCenter,
             latitudeDelta: 0.02,
@@ -1052,6 +1329,8 @@ export default function App() {
           }}
           showsUserLocation={true}
           showsMyLocationButton={false}
+          loadingEnabled={true}
+          loadingBackgroundColor={C.black}
           onRegionChangeComplete={(r: any) => {
             if (pickingMode) {
               setPendingCenter({ latitude: r.latitude, longitude: r.longitude });
@@ -1069,7 +1348,9 @@ export default function App() {
               description="Live location"
               zIndex={1000}
             >
-              <Text style={{ fontSize: 26 }}>🛻</Text>
+              <View style={styles.driverPin}>
+                <Text style={{ fontSize: 18 }}>🛻</Text>
+              </View>
             </Marker>
           )}
           {/* Active Job Pickup Pin (if active package exists) */}
@@ -1119,60 +1400,80 @@ export default function App() {
       {pickingMode && Platform.OS === 'web' && (
         <View
           pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { zIndex: 12, backgroundColor: 'rgba(0,0,0,0.05)' }]}
+          style={[StyleSheet.absoluteFill, { zIndex: 12, backgroundColor: 'rgba(0,0,0,0.08)' }]}
         />
       )}
 
       {/* ---------- CENTER PIN while choosing on native map ---------- */}
       {pickingMode && Platform.OS !== 'web' && (
         <View pointerEvents="none" style={[styles.centerPinWrap, { zIndex: 15 }]}>
-          <Text style={styles.centerPin}>📍</Text>
+          <View style={styles.centerPinHalo} />
+          <View style={styles.centerPinDot} />
           <View style={styles.centerPinShadow} />
         </View>
       )}
 
-      {/* ---------- FLOATING HEADER (home only) ---------- */}
-      {activeTab === 'home' && !pickingMode && (
-        <View style={styles.header}>
-          <View style={styles.logoBadge}>
+      {/* ---------- FLOATING GLASS HEADER (home only) ---------- */}
+      {activeTab === 'home' && !pickingMode && !isScanningAR && (
+        <View style={styles.header} pointerEvents="box-none">
+          <View style={[styles.logoBadge, webGlass]}>
             <Text style={styles.logoBadgeText}>
               Enso<Text style={{ color: C.orange }}>.</Text>
             </Text>
+            <View style={styles.logoBadgeDivider} />
+            <View style={styles.networkDot} />
+            <Text style={styles.logoBadgeNetwork}>Live</Text>
           </View>
-          <TouchableOpacity
-            style={styles.avatarBadge}
+          <PressableScale
+            style={[styles.avatarBadge, webGlass]}
             onPress={() => setActiveTab('profile')}
-            activeOpacity={0.8}
+            accessibilityLabel="Open profile"
+            scaleTo={0.92}
           >
             <Text style={styles.avatarBadgeText}>{userInitial}</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
+      )}
+
+      {/* ---------- FLOATING LOCATE CONTROL (home, map free) ---------- */}
+      {activeTab === 'home' && sheetCollapsed && !pickingMode && !isScanningAR && (
+        <PressableScale
+          style={[styles.locateBtn, webGlass]}
+          onPress={recenter}
+          accessibilityLabel="Center on my location"
+          scaleTo={0.9}
+        >
+          <Text style={styles.locateIcon}>◎</Text>
+        </PressableScale>
       )}
 
       {/* ---------- GROQ AR SCANNER FULLSCREEN OVERLAY ---------- */}
       {isScanningAR && (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.black, zIndex: 100 }]}>
-           <View style={{ position: 'absolute', inset: 0, opacity: 1 }}>
+           <View style={{ position: 'absolute', inset: 0, opacity: 1 } as any}>
              {/* If Web, render HTML5 Video. If Native, fallback to simulated image */}
              {Platform.OS === 'web' ? (
                 // @ts-ignore
-                <video 
-                  ref={videoRef} 
-                  autoPlay 
-                  playsInline 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', filter: isAnalyzing ? 'blur(10px)' : 'none', transition: 'filter 0.3s' }} 
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', filter: isAnalyzing ? 'blur(10px)' : 'none', transition: 'filter 0.3s' }}
                 />
              ) : (
-                <Image 
-                  source={{uri: 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'}} 
-                  style={{width: '100%', height: '100%'}} 
-                  blurRadius={isAnalyzing ? 10 : 0} 
+                <Image
+                  source={{uri: 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'}}
+                  style={{width: '100%', height: '100%'}}
+                  blurRadius={isAnalyzing ? 10 : 0}
                 />
              )}
            </View>
 
+           {/* Subtle vignette for legibility */}
+           <View pointerEvents="none" style={styles.arVignette} />
+
            {/* AR Viewfinder UI */}
-           <View style={styles.arViewfinder}>
+           <View style={styles.arViewfinder} pointerEvents="none">
               <View style={styles.arCornerTopLeft} />
               <View style={styles.arCornerTopRight} />
               <View style={styles.arCornerBottomLeft} />
@@ -1186,27 +1487,28 @@ export default function App() {
 
            {/* Top Bar */}
            <View style={styles.arTopBar}>
-              <View style={styles.arBadge}>
-                <Text style={styles.arBadgeText}>Groq Vision™ Cargo AI</Text>
+              <View style={[styles.arBadge, webGlass]}>
+                <View style={styles.arBadgeDot} />
+                <Text style={styles.arBadgeText}>Groq Vision · Cargo AI</Text>
               </View>
-              <TouchableOpacity onPress={stopCamera} style={styles.arCloseBtn}>
+              <PressableScale onPress={stopCamera} style={[styles.arCloseBtn, webGlass]} accessibilityLabel="Close scanner" scaleTo={0.9}>
                  <Text style={styles.arCloseText}>✕</Text>
-              </TouchableOpacity>
+              </PressableScale>
            </View>
 
            {/* Bottom Bar Actions */}
-           <View style={styles.arBottomBar}>
+           <View style={styles.arBottomBar} pointerEvents="box-none">
               {isAnalyzing ? (
-                 <View style={{alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 20, borderRadius: 20}}>
+                 <View style={[styles.arAnalyzing, webGlass]}>
                    <ActivityIndicator size="large" color={C.orange} />
-                   <Text style={{color: C.orange, marginTop: 14, fontSize: 16, fontWeight: '800'}}>Groq LPU Analyzing Volume...</Text>
+                   <Text style={styles.arAnalyzingText}>Groq LPU analyzing volume…</Text>
                  </View>
               ) : (
                  <View style={{alignItems: 'center'}}>
-                   <Text style={{color: C.white, marginBottom: 20, fontSize: 14, fontWeight: '600', textShadowColor: '#000', textShadowRadius: 10}}>Align object within frame</Text>
-                   <TouchableOpacity style={styles.arCaptureBtn} onPress={processGroqVision} activeOpacity={0.8}>
+                   <Text style={styles.arHint}>Align the object within the frame</Text>
+                   <PressableScale style={styles.arCaptureBtn} onPress={processGroqVision} accessibilityLabel="Capture and analyze" scaleTo={0.9}>
                       <View style={styles.arCaptureInner} />
-                   </TouchableOpacity>
+                   </PressableScale>
                  </View>
               )}
            </View>
@@ -1216,12 +1518,12 @@ export default function App() {
       {/* ---------- PIN-PICKING OVERLAY ---------- */}
       {pickingMode && (
         <>
-          <View style={styles.pickChip}>
+          <View style={[styles.pickChip, webGlass]}>
             <Text style={styles.pickChipText}>
               Drag the map to pinpoint the exact location
             </Text>
           </View>
-          <View style={styles.pickCard}>
+          <View style={[styles.pickCard, webGlass]}>
             <Text style={styles.pickCardTitle}>
               {pickingMode === 'pickup' ? 'Set pickup location' : 'Set drop location'}
             </Text>
@@ -1230,20 +1532,20 @@ export default function App() {
               gate.
             </Text>
             <View style={styles.pickBtnRow}>
-              <TouchableOpacity
+              <PressableScale
                 style={styles.pickCancelBtn}
                 onPress={cancelPicking}
-                activeOpacity={0.8}
+                accessibilityLabel="Cancel pin selection"
               >
                 <Text style={styles.pickCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </PressableScale>
+              <PressableScale
                 style={styles.pickConfirmBtn}
                 onPress={confirmPin}
-                activeOpacity={0.85}
+                accessibilityLabel="Confirm location"
               >
                 <Text style={styles.pickConfirmText}>Confirm location</Text>
-              </TouchableOpacity>
+              </PressableScale>
             </View>
           </View>
         </>
@@ -1256,7 +1558,7 @@ export default function App() {
           style={styles.sheetWrap}
           pointerEvents="box-none"
         >
-          <View style={styles.bottomSheet}>
+          <View style={[styles.bottomSheet, webGlass]}>
             {/* Tap the handle to collapse the sheet and free the map */}
             <TouchableOpacity
               style={styles.dragHandleTap}
@@ -1266,16 +1568,20 @@ export default function App() {
                 Keyboard.dismiss();
               }}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={sheetCollapsed ? 'Expand sheet' : 'Collapse sheet'}
             >
               <View style={styles.dragHandle} />
             </TouchableOpacity>
 
+            <View style={[styles.sheetInner, isWide && styles.sheetInnerWide]}>
             {sheetCollapsed ? (
               /* ================= COLLAPSED BAR ================= */
-              <TouchableOpacity
+              <PressableScale
                 style={styles.collapsedRow}
                 onPress={() => setSheetCollapsed(false)}
-                activeOpacity={0.85}
+                accessibilityLabel="Expand sheet"
+                scaleTo={0.99}
               >
                 {showLiveCard ? (
                   <>
@@ -1292,7 +1598,7 @@ export default function App() {
                     <Text style={styles.collapsedAction}>＋</Text>
                   </>
                 )}
-              </TouchableOpacity>
+              </PressableScale>
             ) : showLiveCard ? (
               /* ================= LIVE REQUEST CARD ================= */
               <View>
@@ -1308,7 +1614,7 @@ export default function App() {
                     <View
                       style={[
                         styles.statusIcon,
-                        isFinished && status === 'cancelled' && { backgroundColor: C.charcoal },
+                        isFinished && status === 'cancelled' && { backgroundColor: C.surfaceAlt },
                       ]}
                     >
                       <Text
@@ -1338,6 +1644,35 @@ export default function App() {
                     </Text>
                   </View>
                 </View>
+
+                {/* Progress tracker — modern shipment timeline */}
+                {status !== 'cancelled' && stepIndex >= 0 && (
+                  <View style={styles.progressWrap}>
+                    <View style={styles.progressTrack}>
+                      {PROGRESS_STEPS.map((_, i) => (
+                        <View
+                          key={i}
+                          style={[
+                            styles.progressSeg,
+                            i === 0 && { marginLeft: 0 },
+                            i <= stepIndex && styles.progressSegFill,
+                          ]}
+                        />
+                      ))}
+                    </View>
+                    <View style={styles.progressLabelsRow}>
+                      {PROGRESS_LABELS.map((label, i) => (
+                        <Text
+                          key={label}
+                          style={[styles.progressLabel, i <= stepIndex && styles.progressLabelOn]}
+                          numberOfLines={1}
+                        >
+                          {label}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 {/* 🚚 Animated truck while searching / in transit */}
                 {truckActive && (
@@ -1389,30 +1724,30 @@ export default function App() {
 
                 {/* Actions */}
                 {status === 'searching' ? (
-                  <TouchableOpacity
+                  <PressableScale
                     style={styles.btnOutline}
                     onPress={cancelRequest}
-                    activeOpacity={0.8}
+                    accessibilityLabel="Cancel request"
                   >
                     <Text style={styles.btnOutlineText}>Cancel request</Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 ) : isFinished ? (
-                  <TouchableOpacity
+                  <PressableScale
                     style={styles.btnCta}
                     onPress={dismissRequest}
-                    activeOpacity={0.85}
+                    accessibilityLabel="Send another shipment"
                   >
                     <Text style={styles.btnCtaText}>Send another shipment</Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 ) : (
                   <View style={styles.actionRow}>
-                    <TouchableOpacity
+                    <PressableScale
                       style={styles.btnNavigate}
                       onPress={openNavigation}
-                      activeOpacity={0.8}
+                      accessibilityLabel="Route to pickup"
                     >
-                      <Text style={styles.btnNavigateText}>🧭 Route to Pickup</Text>
-                    </TouchableOpacity>
+                      <Text style={styles.btnNavigateText}>🧭  Route to pickup</Text>
+                    </PressableScale>
                   </View>
                 )}
               </View>
@@ -1440,7 +1775,7 @@ export default function App() {
                 </View>
 
                 <Text style={styles.fieldLabel}>What are you sending?</Text>
-                <View style={styles.fieldBox}>
+                <View style={[styles.fieldBox, inputFocus === 'item' && styles.fieldBoxFocused]}>
                   <Text style={styles.fieldIcon}>📦</Text>
                   <TextInput
                     style={[styles.fieldInput, { flex: 1 }]}
@@ -1450,19 +1785,21 @@ export default function App() {
                     returnKeyType="next"
                     value={itemName}
                     onChangeText={setItemName}
-                    onFocus={() => setFocusField(null)}
+                    onFocus={() => { setFocusField(null); setInputFocus('item'); }}
+                    onBlur={() => setInputFocus((f) => (f === 'item' ? null : f))}
+                    accessibilityLabel="Item description"
                     // @ts-ignore
                     outlineStyle="none"
                   />
                   {/* AR Scan Button Injection */}
-                  <TouchableOpacity style={styles.arScanBadge} onPress={startARScan} activeOpacity={0.8}>
+                  <PressableScale style={styles.arScanBadge} onPress={startARScan} accessibilityLabel="Scan cargo with AR">
                      <Text style={styles.arScanBadgeIcon}>👁️</Text>
                      <Text style={styles.arScanBadgeText}>AR Scan</Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
 
                 <Text style={styles.fieldLabel}>Pickup point — highway / road stop</Text>
-                <View style={styles.fieldBox}>
+                <View style={[styles.fieldBox, inputFocus === 'pickup' && styles.fieldBoxFocused]}>
                   <View style={styles.dotOrange} />
                   <TextInput
                     style={styles.fieldInput}
@@ -1475,25 +1812,29 @@ export default function App() {
                       setPickupText(t);
                       setFocusField('pickup');
                     }}
-                    onFocus={() => setFocusField('pickup')}
+                    onFocus={() => { setFocusField('pickup'); setInputFocus('pickup'); }}
+                    onBlur={() => setInputFocus((f) => (f === 'pickup' ? null : f))}
+                    accessibilityLabel="Pickup location"
                     // @ts-ignore
                     outlineStyle="none"
                   />
                   {/* Precise Geocoding Search Button */}
-                  <TouchableOpacity
+                  <PressableScale
                     style={styles.pinBtn}
                     onPress={() => geocodeAndPin(pickupText, 'pickup')}
-                    activeOpacity={0.8}
+                    accessibilityLabel="Search pickup address"
+                    scaleTo={0.9}
                   >
                     <Text style={styles.pinBtnText}>🔍</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </PressableScale>
+                  <PressableScale
                     style={styles.pinBtn}
                     onPress={() => startPicking('pickup')}
-                    activeOpacity={0.8}
+                    accessibilityLabel="Drop pin for pickup"
+                    scaleTo={0.9}
                   >
                     <Text style={styles.pinBtnText}>📍</Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
                 {focusField === 'pickup' && suggestions.length > 0 && (
                   <View style={[styles.suggList, { maxHeight: height * 0.25 }]}>
@@ -1503,6 +1844,8 @@ export default function App() {
                         style={styles.suggRow}
                         onPress={() => selectStop(s, 'pickup')}
                         activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use ${s.name.trim()} as pickup`}
                       >
                         <Text style={styles.suggPin}>📍</Text>
                         <View style={{ flex: 1 }}>
@@ -1517,7 +1860,7 @@ export default function App() {
                 )}
 
                 <Text style={styles.fieldLabel}>Drop point — highway / road stop</Text>
-                <View style={styles.fieldBox}>
+                <View style={[styles.fieldBox, inputFocus === 'dest' && styles.fieldBoxFocused]}>
                   <View style={styles.dotWhite} />
                   <TextInput
                     style={styles.fieldInput}
@@ -1530,26 +1873,30 @@ export default function App() {
                       setDestination(t);
                       setFocusField('dest');
                     }}
-                    onFocus={() => setFocusField('dest')}
+                    onFocus={() => { setFocusField('dest'); setInputFocus('dest'); }}
+                    onBlur={() => setInputFocus((f) => (f === 'dest' ? null : f))}
                     onSubmitEditing={() => formReady && requestPickup()}
+                    accessibilityLabel="Drop location"
                     // @ts-ignore
                     outlineStyle="none"
                   />
                   {/* Precise Geocoding Search Button */}
-                  <TouchableOpacity
+                  <PressableScale
                     style={styles.pinBtn}
                     onPress={() => geocodeAndPin(destination, 'dest')}
-                    activeOpacity={0.8}
+                    accessibilityLabel="Search drop address"
+                    scaleTo={0.9}
                   >
                     <Text style={styles.pinBtnText}>🔍</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </PressableScale>
+                  <PressableScale
                     style={styles.pinBtn}
                     onPress={() => startPicking('dest')}
-                    activeOpacity={0.8}
+                    accessibilityLabel="Drop pin for destination"
+                    scaleTo={0.9}
                   >
                     <Text style={styles.pinBtnText}>📍</Text>
-                  </TouchableOpacity>
+                  </PressableScale>
                 </View>
                 {focusField === 'dest' && suggestions.length > 0 && (
                   <View style={[styles.suggList, { maxHeight: height * 0.25 }]}>
@@ -1559,6 +1906,8 @@ export default function App() {
                         style={styles.suggRow}
                         onPress={() => selectStop(s, 'dest')}
                         activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use ${s.name.trim()} as destination`}
                       >
                         <Text style={styles.suggPin}>📍</Text>
                         <View style={{ flex: 1 }}>
@@ -1572,11 +1921,12 @@ export default function App() {
                   </View>
                 )}
 
-                <TouchableOpacity
+                <PressableScale
                   style={formReady ? styles.btnCta : styles.btnDisabled}
                   onPress={requestPickup}
                   disabled={isSubmitting || !formReady}
-                  activeOpacity={0.85}
+                  accessibilityLabel="Find a route match"
+                  accessibilityState={{ disabled: isSubmitting || !formReady }}
                 >
                   {isSubmitting ? (
                     <ActivityIndicator color={C.black} />
@@ -1585,9 +1935,10 @@ export default function App() {
                       Find a route match
                     </Text>
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               </View>
             )}
+            </View>
           </View>
         </KeyboardAvoidingView>
       )}
@@ -1595,6 +1946,7 @@ export default function App() {
       {/* ======================= ACTIVITY TAB ======================= */}
       {activeTab === 'activity' && (
         <View style={styles.screen}>
+          <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide]}>
           <Text style={styles.screenTitle}>Activity</Text>
           <Text style={styles.screenSub}>
             {history.length === 0
@@ -1602,67 +1954,171 @@ export default function App() {
               : `${history.length} shipment${history.length === 1 ? '' : 's'}`}
           </Text>
 
-          {history.length === 0 ? (
+          {/* Search */}
+          <View style={[styles.searchBar, inputFocus === 'activitySearch' && styles.searchBarFocused]}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search item, pickup or destination"
+              placeholderTextColor={C.gray500}
+              selectionColor={C.orange}
+              value={activitySearch}
+              onChangeText={setActivitySearch}
+              onFocus={() => setInputFocus('activitySearch')}
+              onBlur={() => setInputFocus((f) => (f === 'activitySearch' ? null : f))}
+              accessibilityLabel="Search shipments"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+            {activitySearch.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setActivitySearch('')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Text style={styles.searchClear}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Filters */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterRow}
+            contentContainerStyle={{ paddingRight: 8 }}
+          >
+            {ACTIVITY_FILTERS.map((f) => {
+              const active = activityFilter === f.key;
+              return (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setActivityFilter(f.key)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Filter: ${f.label}`}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                    {f.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {historyLoading && history.length === 0 ? (
+            <View style={{ marginTop: 8 }}>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </View>
+          ) : history.length === 0 ? (
             <View style={styles.emptyWrap}>
-              <Text style={styles.emptyEmoji}>📦</Text>
+              <View style={styles.emptyBadge}>
+                <Text style={styles.emptyEmoji}>📦</Text>
+              </View>
               <Text style={styles.emptyTitle}>No shipments yet</Text>
               <Text style={styles.emptySub}>
                 Send your first shipment and it will show up here with its live status.
               </Text>
-              <TouchableOpacity
-                style={[styles.btnCta, { marginTop: 24, width: 'auto', paddingHorizontal: 28 }]}
+              <PressableScale
+                style={[styles.btnCta, { marginTop: 24, alignSelf: 'center', paddingHorizontal: 30 }]}
                 onPress={() => setActiveTab('home')}
-                activeOpacity={0.85}
+                accessibilityLabel="Send a shipment"
               >
                 <Text style={styles.btnCtaText}>Send a shipment</Text>
-              </TouchableOpacity>
+              </PressableScale>
+            </View>
+          ) : groupedHistory.length === 0 ? (
+            <View style={styles.miniEmpty}>
+              <Text style={styles.miniEmptyText}>No shipments match your search or filter.</Text>
             </View>
           ) : (
             <ScrollView
               style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 130 }}
+              contentContainerStyle={{ paddingBottom: 130, paddingTop: 4 }}
               showsVerticalScrollIndicator={false}
             >
-              {history.map((item) => {
-                const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.searching;
-                const isActive = ACTIVE_STATUSES.includes(item.status);
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.historyCard}
-                    activeOpacity={isActive ? 0.75 : 1}
-                    onPress={() => openHistoryItem(item)}
-                  >
-                    <View style={styles.historyTop}>
-                      <Text style={styles.historyItem} numberOfLines={1}>
-                        {item.item_name}
-                      </Text>
-                      <View style={[styles.statusPill, { backgroundColor: badge.bg }]}>
-                        <Text style={[styles.statusPillText, { color: badge.color }]}>
-                          {badge.label}
+              {groupedHistory.map((section) => (
+                <View key={section.group}>
+                  <Text style={styles.groupLabel}>{section.group}</Text>
+                  {section.rows.map((item) => {
+                    const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.searching;
+                    const isActive = ACTIVE_STATUSES.includes(item.status);
+                    return (
+                      <PressableScale
+                        key={item.id}
+                        style={styles.historyCard}
+                        onPress={() => openHistoryItem(item)}
+                        haptics={isActive}
+                        scaleTo={isActive ? 0.985 : 1}
+                        accessibilityLabel={`${item.item_name}, ${badge.label}`}
+                      >
+                        <View style={styles.historyTop}>
+                          <Text style={styles.historyItem} numberOfLines={1}>
+                            {item.item_name}
+                          </Text>
+                          <View style={[styles.statusPill, { backgroundColor: badge.bg }]}>
+                            <Text style={[styles.statusPillText, { color: badge.color }]}>
+                              {badge.label}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.historyDest} numberOfLines={1}>
+                          {(item.pickup_name ?? 'Current location') + '  →  ' + item.destination_name}
                         </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.historyDest} numberOfLines={1}>
-                      {(item.pickup_name ?? 'Current location') + '  →  ' + item.destination_name}
-                    </Text>
-                    <View style={styles.historyBottom}>
-                      <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
-                      {isActive && <Text style={styles.historyTrack}>Track →</Text>}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+                        <View style={styles.historyBottom}>
+                          <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
+                          {isActive && <Text style={styles.historyTrack}>Track →</Text>}
+                        </View>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              ))}
             </ScrollView>
           )}
+          </FadeInView>
         </View>
       )}
 
       {/* ======================= STOPS TAB (ALL-INDIA) ======================= */}
       {activeTab === 'stops' && (
         <View style={styles.screen}>
+          <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide]}>
           <Text style={styles.screenTitle}>Line stops</Text>
-          <Text style={styles.screenSub}>Pan-India Relay Nodes on the Enso network</Text>
+          <Text style={styles.screenSub}>Pan-India relay nodes on the Enso network</Text>
+
+          {/* Search */}
+          <View style={[styles.searchBar, inputFocus === 'stopSearch' && styles.searchBarFocused]}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search a stop, hub or corridor"
+              placeholderTextColor={C.gray500}
+              selectionColor={C.orange}
+              value={stopSearch}
+              onChangeText={setStopSearch}
+              onFocus={() => setInputFocus('stopSearch')}
+              onBlur={() => setInputFocus((f) => (f === 'stopSearch' ? null : f))}
+              accessibilityLabel="Search stops"
+              // @ts-ignore
+              outlineStyle="none"
+            />
+            {stopSearch.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setStopSearch('')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Text style={styles.searchClear}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           <ScrollView
             style={{ flex: 1 }}
@@ -1670,54 +2126,63 @@ export default function App() {
             showsVerticalScrollIndicator={false}
           >
             <Text style={styles.stopsFootnote}>
-              Relay nodes switch automatically depending on which driver accepts your package. 
+              Relay nodes switch automatically depending on which driver accepts your package.
               The AI handles transfers seamlessly across India.
             </Text>
-            
-            {LINE_GROUPS.map((group) => (
-              <View key={group} style={{ marginBottom: 22, marginTop: 12 }}>
-                <View style={styles.lineHeader}>
-                  <View style={styles.lineDot} />
-                  <Text style={styles.lineTitle}>{group}</Text>
-                </View>
-                <View style={styles.lineCard}>
-                  {HIGHWAY_STOPS.filter((s) => s.group === group).map((stop, idx, arr) => (
-                    <TouchableOpacity
-                      key={stop.name + stop.group}
-                      style={[
-                        styles.stopRow,
-                        idx < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.line },
-                      ]}
-                      onPress={() => {
-                        setDestination(stop.name.trim());
-                        setDestPoint({ latitude: stop.latitude, longitude: stop.longitude });
-                        setActiveTab('home');
-                        setSheetCollapsed(false);
-                        focusMap(pickupPoint ?? coords, {
-                          latitude: stop.latitude,
-                          longitude: stop.longitude,
-                        });
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.stopPin}>📍</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.stopName}>{stop.name.trim()}</Text>
-                        <Text style={styles.stopTag}>{stop.tag}</Text>
-                      </View>
-                      <Text style={styles.stopAction}>Send here →</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+
+            {visibleGroups.length === 0 ? (
+              <View style={styles.miniEmpty}>
+                <Text style={styles.miniEmptyText}>No stops match “{stopSearch.trim()}”.</Text>
               </View>
-            ))}
+            ) : (
+              visibleGroups.map((group) => (
+                <View key={group} style={{ marginBottom: 22, marginTop: 12 }}>
+                  <View style={styles.lineHeader}>
+                    <View style={styles.lineDot} />
+                    <Text style={styles.lineTitle}>{group}</Text>
+                  </View>
+                  <View style={styles.lineCard}>
+                    {filteredStops.filter((s) => s.group === group).map((stop, idx, arr) => (
+                      <PressableScale
+                        key={stop.name + stop.group}
+                        style={[
+                          styles.stopRow,
+                          idx < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: C.hairline },
+                        ]}
+                        onPress={() => {
+                          setDestination(stop.name.trim());
+                          setDestPoint({ latitude: stop.latitude, longitude: stop.longitude });
+                          setActiveTab('home');
+                          setSheetCollapsed(false);
+                          focusMap(pickupPoint ?? coords, {
+                            latitude: stop.latitude,
+                            longitude: stop.longitude,
+                          });
+                        }}
+                        scaleTo={0.99}
+                        accessibilityLabel={`Send to ${stop.name.trim()}`}
+                      >
+                        <Text style={styles.stopPin}>📍</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.stopName}>{stop.name.trim()}</Text>
+                          <Text style={styles.stopTag}>{stop.tag}</Text>
+                        </View>
+                        <Text style={styles.stopAction}>Send here →</Text>
+                      </PressableScale>
+                    ))}
+                  </View>
+                </View>
+              ))
+            )}
           </ScrollView>
+          </FadeInView>
         </View>
       )}
 
       {/* ======================= PROFILE TAB ======================= */}
       {activeTab === 'profile' && (
         <View style={styles.screen}>
+          <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide, { flex: 1 }]}>
           <Text style={styles.screenTitle}>Profile</Text>
           <Text style={styles.screenSub}>Your account</Text>
 
@@ -1742,31 +2207,36 @@ export default function App() {
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={styles.statNumber}>{history.length}</Text>
-              <Text style={styles.statLabel}>Shipments sent</Text>
+              <Text style={styles.statLabel}>Sent</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statNumber}>{deliveredCount}</Text>
               <Text style={styles.statLabel}>Delivered</Text>
             </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statNumber}>{activeCount}</Text>
+              <Text style={styles.statLabel}>Active</Text>
+            </View>
           </View>
 
           <View style={{ flex: 1 }} />
 
-          <TouchableOpacity style={styles.btnLogout} onPress={handleLogout} activeOpacity={0.8}>
+          <PressableScale style={styles.btnLogout} onPress={handleLogout} accessibilityLabel="Log out">
             <Text style={styles.btnLogoutText}>Log out</Text>
-          </TouchableOpacity>
+          </PressableScale>
           <Text style={styles.versionText}>Enso v1.0</Text>
+          </FadeInView>
         </View>
       )}
 
-      {/* ======================= FLOATING TRANSPARENT CURVED NAVBAR ======================= */}
+      {/* ======================= FLOATING GLASS NAVBAR ======================= */}
       {!pickingMode && !isScanningAR && (
         <View style={styles.navbarWrap} pointerEvents="box-none">
-          <View style={styles.navbar}>
+          <View style={[styles.navbar, webGlass]}>
             {TABS.map((tab) => {
               const active = activeTab === tab.key;
               return (
-                <TouchableOpacity
+                <PressableScale
                   key={tab.key}
                   style={[styles.navItem, active && styles.navItemActive]}
                   onPress={() => {
@@ -1774,13 +2244,16 @@ export default function App() {
                     setFocusField(null);
                     Keyboard.dismiss();
                   }}
-                  activeOpacity={0.75}
+                  scaleTo={0.9}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={tab.label}
                 >
-                  <Text style={[styles.navIcon, !active && { opacity: 0.45 }]}>{tab.icon}</Text>
+                  <Text style={[styles.navIcon, !active && { opacity: 0.42 }]}>{tab.icon}</Text>
                   <Text style={[styles.navLabel, active && styles.navLabelActive]}>
                     {tab.label}
                   </Text>
-                </TouchableOpacity>
+                </PressableScale>
               );
             })}
           </View>
@@ -1791,7 +2264,7 @@ export default function App() {
 }
 
 // ==========================================
-// STYLES — MINIMAL ORANGE & BLACK
+// STYLES — ORANGE & BLACK · PREMIUM DARK GLASS
 // ==========================================
 const styles = StyleSheet.create({
   center: {
@@ -1800,81 +2273,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: C.black,
   },
-  splashLogo: {
-    fontSize: 44,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -1.5,
+  splashMark: {
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 22,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairline,
   },
-  mapIframe: {
-    width: '100%',
-    height: '100%',
-    borderWidth: 0,
+  splashLogo: { fontSize: 40, fontWeight: '800', color: C.white, letterSpacing: -1.5 },
+  splashTagline: {
+    marginTop: 18,
+    color: C.gray500,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  mapIframe: { width: '100%', height: '100%', borderWidth: 0 },
+  driverPin: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
   },
 
-  // ---------- Auth (dark) ----------
+  // ---------- Auth ----------
   authContainer: {
     flex: 1,
     backgroundColor: C.black,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 28,
   },
-  authCard: { width: '100%', maxWidth: 400 },
-  authLogo: {
-    fontSize: 44,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -1.5,
+  authCard: { width: '100%', maxWidth: 420 },
+  authLogo: { fontSize: 46, fontWeight: '800', color: C.white, letterSpacing: -1.6, marginBottom: 12 },
+  authSubtitle: { fontSize: 16, color: C.gray400, marginBottom: 44, fontWeight: '500', lineHeight: 24 },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.gray500,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
     marginBottom: 10,
   },
-  authSubtitle: {
-    fontSize: 15,
-    color: C.gray400,
-    marginBottom: 40,
-    fontWeight: '500',
-    lineHeight: 22,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: C.gray400,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
   inputBox: {
-    backgroundColor: C.charcoal,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.field,
     width: '100%',
-    paddingVertical: 16,
     paddingHorizontal: 18,
-    borderRadius: 14,
-    marginBottom: 20,
-    fontSize: 16,
-    color: C.white,
+    borderRadius: 16,
+    marginBottom: 22,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: 'transparent',
   },
+  inputBoxFocused: { backgroundColor: C.fieldFocus, borderColor: C.orangeBorder },
+  inputGlyph: { color: C.gray500, fontSize: 15, marginRight: 12, width: 18, textAlign: 'center' },
+  inputField: { flex: 1, paddingVertical: 17, fontSize: 16, color: C.white, fontWeight: '500' },
   btnPrimary: {
     width: '100%',
     paddingVertical: 17,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: C.orange,
-    marginTop: 8,
+    marginTop: 10,
+    shadowColor: C.orange,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  btnPrimaryText: {
-    color: C.black,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  authToggle: { marginTop: 28, alignItems: 'center' },
+  btnPrimaryLoading: { backgroundColor: C.orangeDark },
+  btnPrimaryText: { color: C.black, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  authToggle: { marginTop: 30, alignItems: 'center' },
   authToggleText: { color: C.gray400, fontSize: 14, fontWeight: '500' },
   authToggleAccent: { color: C.orange, fontWeight: '700' },
   authFooter: {
     position: 'absolute',
-    bottom: 36,
+    bottom: 40,
     color: C.gray700,
     fontSize: 12,
     fontWeight: '600',
@@ -1884,7 +2369,6 @@ const styles = StyleSheet.create({
 
   // ---------- App shell ----------
   appRoot: { flex: 1, backgroundColor: C.black },
-
   header: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 56 : 44,
@@ -1896,65 +2380,97 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   logoBadge: {
-    backgroundColor: C.black,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.glass,
     paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
+    paddingVertical: 11,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  logoBadgeText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.5,
+  logoBadgeText: { fontSize: 18, fontWeight: '800', color: C.white, letterSpacing: -0.5 },
+  logoBadgeDivider: { width: 1, height: 16, backgroundColor: C.hairlineStrong, marginHorizontal: 12 },
+  networkDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginRight: 7 },
+  logoBadgeNetwork: {
+    color: C.gray400,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   avatarBadge: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: C.black,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: C.glass,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.glassBorder,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   avatarBadgeText: { color: C.orange, fontSize: 16, fontWeight: '800' },
 
-  // ---------- Center pin (Uber-style picking) ----------
+  // ---------- Floating locate control ----------
+  locateBtn: {
+    position: 'absolute',
+    right: 20,
+    bottom: 176,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.glassStrong,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  locateIcon: { color: C.orange, fontSize: 22, fontWeight: '700', marginTop: -1 },
+
+  // ---------- Center pin (native picking) ----------
   centerPinWrap: {
     position: 'absolute',
     top: '50%',
     left: '50%',
-    marginLeft: -18,
-    marginTop: -40,
+    marginLeft: -28,
+    marginTop: -28,
+    width: 56,
+    height: 56,
     alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 15,
   },
-  centerPin: { fontSize: 36, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 10 },
-  centerPinShadow: {
-    width: 10,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    marginTop: -2,
-  },
+  centerPinHalo: { position: 'absolute', width: 56, height: 56, borderRadius: 28, backgroundColor: C.orangeSoftStrong },
+  centerPinDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.orange, borderWidth: 3, borderColor: C.black },
+  centerPinShadow: { position: 'absolute', bottom: 8, width: 12, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.4)' },
+
+  // ---------- Pin-picking overlay ----------
   pickChip: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 62 : 50,
     alignSelf: 'center',
-    backgroundColor: 'rgba(10,10,10,0.92)',
+    backgroundColor: C.glassStrong,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.glassBorder,
     zIndex: 16,
   },
   pickChipText: { color: C.white, fontSize: 13, fontWeight: '600' },
@@ -1963,244 +2479,172 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     bottom: Platform.OS === 'ios' ? 40 : 28,
-    backgroundColor: C.black,
-    borderRadius: 22,
+    maxWidth: 520,
+    alignSelf: 'center',
+    width: '92%',
+    backgroundColor: C.glassSheet,
+    borderRadius: 26,
     borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
+    borderColor: C.glassBorderStrong,
+    padding: 22,
     zIndex: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
     elevation: 16,
   },
-  pickCardTitle: { color: C.white, fontSize: 18, fontWeight: '800', marginBottom: 6 },
-  pickCardSub: { color: C.gray400, fontSize: 13, lineHeight: 18, marginBottom: 16 },
-  pickBtnRow: { flexDirection: 'row', gap: 10 },
+  pickCardTitle: { color: C.white, fontSize: 19, fontWeight: '800', marginBottom: 7, letterSpacing: -0.3 },
+  pickCardSub: { color: C.gray400, fontSize: 13.5, lineHeight: 19, marginBottom: 18 },
+  pickBtnRow: { flexDirection: 'row', gap: 12 },
   pickCancelBtn: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 15,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: C.gray700,
+    borderColor: C.hairlineStrong,
   },
   pickCancelText: { color: C.gray400, fontSize: 14, fontWeight: '700' },
   pickConfirmBtn: {
     flex: 2,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 15,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
   },
   pickConfirmText: { color: C.black, fontSize: 14, fontWeight: '800' },
 
-  // ---------- Bottom sheet (dark, connected to bottom) ----------
-  sheetWrap: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 5,
-  },
+  // ---------- Bottom sheet ----------
+  sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 },
   bottomSheet: {
     width: '100%',
-    backgroundColor: C.black,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 24,
+    backgroundColor: C.glassSheet,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderTopWidth: 1,
+    borderColor: C.glassBorderStrong,
+    paddingHorizontal: 22,
     paddingTop: 8,
-    // big bottom padding = solid black zone the floating navbar sits on
-    paddingBottom: Platform.OS === 'ios' ? 112 : 100,
+    paddingBottom: Platform.OS === 'ios' ? 116 : 104,
     shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: -10 },
-    elevation: 20,
+    shadowOpacity: 0.4,
+    shadowRadius: 34,
+    shadowOffset: { width: 0, height: -12 },
+    elevation: 24,
   },
-  dragHandleTap: { paddingVertical: 10, alignSelf: 'stretch', alignItems: 'center' },
-  dragHandle: {
-    width: 36,
-    height: 4,
-    backgroundColor: C.gray700,
-    borderRadius: 2,
-  },
+  sheetInner: { width: '100%' },
+  sheetInnerWide: { maxWidth: 600, alignSelf: 'center' },
+  dragHandleTap: { paddingVertical: 12, alignSelf: 'stretch', alignItems: 'center' },
+  dragHandle: { width: 40, height: 5, backgroundColor: C.gray700, borderRadius: 3 },
   collapsedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
+    backgroundColor: C.surface,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: C.line,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    borderColor: C.hairline,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
   },
-  collapsedText: {
-    flex: 1,
-    color: C.white,
-    fontSize: 15,
-    fontWeight: '700',
-    marginLeft: 12,
-  },
-  collapsedAction: { color: C.orange, fontSize: 15, fontWeight: '800' },
-  pulseDotSmall: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: C.orange,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  sheetTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.5,
-  },
+  collapsedText: { flex: 1, color: C.white, fontSize: 15, fontWeight: '700', marginLeft: 12 },
+  collapsedAction: { color: C.orange, fontSize: 16, fontWeight: '800' },
+  pulseDotSmall: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.orange },
+  dotOrange: { width: 11, height: 11, borderRadius: 6, backgroundColor: C.orange },
+  dotWhite: { width: 11, height: 11, borderRadius: 3, backgroundColor: C.white },
+
+  // ---------- Request form ----------
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sheetTitle: { fontSize: 23, fontWeight: '800', color: C.white, letterSpacing: -0.5 },
   relayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    backgroundColor: C.orangeSoft,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.25)',
+    borderColor: C.orangeBorder,
   },
-  relayDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: C.orange,
-    marginRight: 7,
-  },
+  relayDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginRight: 7 },
   relayBadgeText: {
     color: C.orange,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
-
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  locationIcon: { color: C.orange, fontSize: 12, marginRight: 8 },
-  locationText: { color: C.gray400, fontSize: 13, fontWeight: '500', flex: 1 },
-
-  // Form fields
+  locationRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
+  locationIcon: { color: C.orange, fontSize: 12, marginRight: 9 },
+  locationText: { color: C.gray400, fontSize: 13, fontWeight: '500', flex: 1, lineHeight: 18 },
   fieldLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: C.gray400,
-    letterSpacing: 1,
+    color: C.gray500,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    marginBottom: 9,
   },
   fieldBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderRadius: 14,
-    paddingHorizontal: 14,
+    backgroundColor: C.field,
+    borderRadius: 16,
+    paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: C.line,
-    marginBottom: 14,
+    borderColor: 'transparent',
+    marginBottom: 16,
   },
-  fieldInput: {
-    flex: 1,
-    fontSize: 15,
-    color: C.white,
-    fontWeight: '500',
-    paddingVertical: 15,
-    marginLeft: 12,
-  },
+  fieldBoxFocused: { backgroundColor: C.fieldFocus, borderColor: C.orangeBorder },
+  fieldInput: { flex: 1, fontSize: 15, color: C.white, fontWeight: '500', paddingVertical: 16, marginLeft: 12 },
   fieldIcon: { fontSize: 14 },
   pinBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(249,115,22,0.12)',
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: C.orangeSoft,
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.25)',
+    borderColor: C.orangeBorder,
     marginLeft: 8,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pinBtnText: { fontSize: 14 },
-  dotOrange: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: C.orange,
-  },
-  dotWhite: {
-    width: 10,
-    height: 10,
-    borderRadius: 2,
-    backgroundColor: C.white,
-  },
-  connectorLine: {
-    width: 2,
-    height: 14,
-    backgroundColor: C.gray700,
-    marginLeft: 4,
-    marginVertical: 4,
-  },
-
-  // Highway-stop suggestions
+  connectorLine: { width: 2, height: 16, backgroundColor: C.gray700, marginLeft: 5, marginVertical: 4 },
   suggList: {
-    backgroundColor: C.charcoal,
-    borderRadius: 14,
+    backgroundColor: C.surfaceAlt,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     marginTop: -6,
-    marginBottom: 14,
+    marginBottom: 16,
     overflow: 'hidden',
   },
   suggRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     borderBottomWidth: 1,
-    borderBottomColor: C.line,
+    borderBottomColor: C.hairline,
   },
   suggPin: { fontSize: 14, marginRight: 12 },
   suggName: { color: C.white, fontSize: 14, fontWeight: '700' },
   suggTag: { color: C.gray500, fontSize: 11, fontWeight: '500', marginTop: 2 },
 
-  // Live status card
-  statusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  pulseWrap: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(249, 115, 22, 0.25)',
-  },
-  pulseDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: C.orange,
-  },
+  // ---------- Live status card ----------
+  statusHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
+  pulseWrap: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  pulseRing: { position: 'absolute', width: 30, height: 30, borderRadius: 15, backgroundColor: C.orangeSoftStrong },
+  pulseDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.orange },
   statusIcon: {
     width: 48,
     height: 48,
@@ -2210,82 +2654,97 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
   },
-  statusIconText: {
-    color: C.black,
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  statusTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.3,
-    marginBottom: 4,
-  },
-  statusSubtitle: {
-    fontSize: 13,
-    color: C.gray400,
-    fontWeight: '500',
-    lineHeight: 18,
-  },
+  statusIconText: { color: C.black, fontSize: 20, fontWeight: '800' },
+  statusTitle: { fontSize: 20, fontWeight: '800', color: C.white, letterSpacing: -0.3, marginBottom: 4 },
+  statusSubtitle: { fontSize: 13, color: C.gray400, fontWeight: '500', lineHeight: 18 },
 
-  // 🚚 Animated road
+  // ---------- Progress tracker ----------
+  progressWrap: { marginBottom: 16 },
+  progressTrack: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  progressSeg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: C.line, marginLeft: 6 },
+  progressSegFill: { backgroundColor: C.orange },
+  progressLabelsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  progressLabel: { flex: 1, color: C.gray600, fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textAlign: 'center' },
+  progressLabelOn: { color: C.orange },
+
+  // ---------- Animated road ----------
   roadScene: {
     height: 64,
-    backgroundColor: C.charcoal,
+    backgroundColor: C.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: C.line,
-    marginBottom: 14,
+    borderColor: C.hairline,
+    marginBottom: 16,
     overflow: 'hidden',
     justifyContent: 'center',
   },
-  roadLineWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '68%',
-    height: 4,
-    overflow: 'hidden',
-  },
+  roadLineWrap: { position: 'absolute', left: 0, right: 0, top: '68%', height: 4, overflow: 'hidden' },
   dashRow: { flexDirection: 'row' },
-  dash: {
-    width: 22,
-    height: 3,
-    backgroundColor: C.gray700,
-    borderRadius: 2,
-    marginRight: 18,
-  },
-  truck: {
-    position: 'absolute',
-    left: '36%',
-    top: 8,
-    fontSize: 30,
-  },
-  roadPin: {
-    position: 'absolute',
-    right: 14,
-    top: 12,
-    fontSize: 18,
-  },
+  dash: { width: 22, height: 3, backgroundColor: C.gray700, borderRadius: 2, marginRight: 18 },
+  truck: { position: 'absolute', left: '36%', top: 8, fontSize: 30 },
+  roadPin: { position: 'absolute', right: 16, top: 12, fontSize: 18 },
 
   summaryCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: C.surface,
+    borderRadius: 18,
+    padding: 18,
     borderWidth: 1,
-    borderColor: C.line,
-    marginBottom: 16,
+    borderColor: C.hairline,
+    marginBottom: 18,
   },
   summaryRow: { flexDirection: 'row', alignItems: 'center' },
   summaryIcon: { fontSize: 13, width: 14, textAlign: 'center' },
-  summaryText: {
-    color: C.white,
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 12,
+  summaryText: { color: C.white, fontSize: 15, fontWeight: '600', marginLeft: 12, flex: 1 },
+
+  // ---------- Buttons ----------
+  actionRow: { flexDirection: 'row', gap: 12 },
+  btnNavigate: {
     flex: 1,
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairlineStrong,
   },
+  btnNavigateText: { color: C.white, fontSize: 14, fontWeight: '700' },
+  btnCta: {
+    width: '100%',
+    paddingVertical: 17,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  btnCtaText: { color: C.black, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  btnDisabled: {
+    width: '100%',
+    paddingVertical: 17,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairline,
+  },
+  btnDisabledText: { color: C.gray500, fontSize: 16, fontWeight: '700' },
+  btnOutline: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: C.hairlineStrong,
+  },
+  btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
 
   // ---------- Activity / Stops / Profile screens ----------
   screen: {
@@ -2295,130 +2754,122 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 68 : 52,
     zIndex: 8,
   },
-  screenTitle: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: C.white,
-    letterSpacing: -0.8,
-  },
-  screenSub: {
-    fontSize: 14,
-    color: C.gray500,
-    fontWeight: '500',
-    marginTop: 4,
-    marginBottom: 22,
-  },
+  screenInner: { flex: 1, width: '100%' },
+  screenInnerWide: { maxWidth: 680, alignSelf: 'center' },
+  screenTitle: { fontSize: 31, fontWeight: '800', color: C.white, letterSpacing: -0.8 },
+  screenSub: { fontSize: 14, color: C.gray500, fontWeight: '500', marginTop: 4, marginBottom: 20 },
 
-  emptyWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingBottom: 140,
-  },
-  emptyEmoji: { fontSize: 44, marginBottom: 14 },
-  emptyTitle: { color: C.white, fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  emptySub: {
-    color: C.gray500,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 280,
-  },
-
-  historyCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 16,
-    marginBottom: 12,
-  },
-  historyTop: {
+  // ---------- Search + filters ----------
+  searchBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    backgroundColor: C.field,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    marginBottom: 14,
   },
-  historyItem: {
-    color: C.white,
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: 10,
+  searchBarFocused: { backgroundColor: C.fieldFocus, borderColor: C.orangeBorder },
+  searchIcon: { fontSize: 14, marginRight: 10, opacity: 0.7 },
+  searchInput: { flex: 1, fontSize: 15, color: C.white, fontWeight: '500', paddingVertical: 14 },
+  searchClear: { color: C.gray500, fontSize: 15, fontWeight: '700', paddingLeft: 8 },
+  filterRow: { flexGrow: 0, marginBottom: 16 },
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    marginRight: 8,
   },
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  statusPillText: {
-    fontSize: 10,
+  filterChipActive: { backgroundColor: C.orangeSoft, borderColor: C.orangeBorder },
+  filterChipText: { color: C.gray400, fontSize: 13, fontWeight: '700' },
+  filterChipTextActive: { color: C.orange },
+  groupLabel: {
+    color: C.gray500,
+    fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-  },
-  historyDest: {
-    color: C.gray400,
-    fontSize: 13,
-    fontWeight: '500',
+    marginTop: 14,
     marginBottom: 10,
   },
-  historyBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  miniEmpty: {
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    padding: 22,
+    marginTop: 8,
     alignItems: 'center',
   },
+  miniEmptyText: { color: C.gray500, fontSize: 14, fontWeight: '500', textAlign: 'center' },
+
+  // ---------- Empty states ----------
+  emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 140 },
+  emptyBadge: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  emptyEmoji: { fontSize: 38 },
+  emptyTitle: { color: C.white, fontSize: 19, fontWeight: '800', marginBottom: 8, letterSpacing: -0.3 },
+  emptySub: { color: C.gray500, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 290 },
+
+  // ---------- History cards ----------
+  historyCard: {
+    backgroundColor: C.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.hairline,
+    padding: 18,
+    marginBottom: 12,
+  },
+  historyTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 },
+  historyItem: { color: C.white, fontSize: 16, fontWeight: '700', flex: 1, marginRight: 10 },
+  statusPill: { paddingHorizontal: 11, paddingVertical: 5, borderRadius: 12 },
+  statusPillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
+  historyDest: { color: C.gray400, fontSize: 13, fontWeight: '500', marginBottom: 12 },
+  historyBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   historyDate: { color: C.gray500, fontSize: 12, fontWeight: '500' },
   historyTrack: { color: C.orange, fontSize: 12, fontWeight: '800' },
 
-  // Stops directory
+  skeleton: { backgroundColor: C.gray700, borderRadius: 8 },
+
+  // ---------- Stops directory ----------
+  stopsFootnote: { color: C.gray500, fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: 8 },
   lineHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  lineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: C.orange,
-    marginRight: 10,
-  },
-  lineTitle: {
-    color: C.gray400,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
+  lineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.orange, marginRight: 10 },
+  lineTitle: { color: C.gray400, fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
   lineCard: {
-    backgroundColor: C.charcoal,
-    borderRadius: 18,
+    backgroundColor: C.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     overflow: 'hidden',
   },
-  stopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
+  stopRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 15 },
   stopPin: { fontSize: 14, marginRight: 12 },
   stopName: { color: C.white, fontSize: 15, fontWeight: '700' },
   stopTag: { color: C.gray500, fontSize: 11, fontWeight: '500', marginTop: 2 },
   stopAction: { color: C.orange, fontSize: 12, fontWeight: '800' },
-  stopsFootnote: {
-    color: C.gray500,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    marginBottom: 8,
-  },
 
+  // ---------- Profile ----------
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderRadius: 18,
+    backgroundColor: C.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: C.hairline,
     padding: 18,
     marginBottom: 16,
   },
@@ -2434,42 +2885,35 @@ const styles = StyleSheet.create({
   profileAvatarText: { color: C.black, fontSize: 24, fontWeight: '800' },
   profileEmail: { color: C.white, fontSize: 16, fontWeight: '700', marginBottom: 4 },
   profileJoined: { color: C.gray500, fontSize: 13, fontWeight: '500' },
-
   statsRow: { flexDirection: 'row', gap: 12 },
   statBox: {
     flex: 1,
-    backgroundColor: C.charcoal,
-    borderRadius: 18,
+    backgroundColor: C.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.line,
-    paddingVertical: 20,
+    borderColor: C.hairline,
+    paddingVertical: 22,
     alignItems: 'center',
   },
   statNumber: { color: C.orange, fontSize: 28, fontWeight: '800', marginBottom: 4 },
   statLabel: { color: C.gray500, fontSize: 12, fontWeight: '600' },
-
   btnLogout: {
     width: '100%',
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: C.gray700,
+    borderColor: C.hairlineStrong,
     marginBottom: 12,
   },
-  btnLogoutText: { color: C.white, fontSize: 15, fontWeight: '700' },
-  versionText: {
-    color: C.gray700,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 120,
-  },
+  btnLogoutText: { color: C.danger, fontSize: 15, fontWeight: '700' },
+  versionText: { color: C.gray700, fontSize: 12, fontWeight: '600', textAlign: 'center', marginBottom: 120 },
 
-  // ---------- Floating transparent curved navbar ----------
+  // ---------- Floating glass navbar ----------
   navbarWrap: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 26 : 16,
+    bottom: Platform.OS === 'ios' ? 28 : 16,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -2477,98 +2921,44 @@ const styles = StyleSheet.create({
   },
   navbar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(10, 10, 10, 0.88)',
+    backgroundColor: C.glassStrong,
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: C.glassBorder,
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 4,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 16,
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 18,
   },
-  navItem: {
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 22,
-  },
-  navItemActive: {
-    backgroundColor: 'rgba(249, 115, 22, 0.14)',
-  },
+  navItem: { alignItems: 'center', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 22 },
+  navItemActive: { backgroundColor: C.orangeSoftStrong },
   navIcon: { fontSize: 18, marginBottom: 2 },
-  navLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: C.gray500,
-  },
+  navLabel: { fontSize: 10, fontWeight: '600', color: C.gray500 },
   navLabelActive: { color: C.orange, fontWeight: '800' },
 
-  actionRow: { flexDirection: 'row', gap: 10 },
-  btnNavigate: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: C.gray700,
-  },
-  btnNavigateText: { color: C.white, fontSize: 14, fontWeight: '700' },
-
-  // Buttons
-  btnCta: {
-    width: '100%',
-    paddingVertical: 17,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: C.orange,
-  },
-  btnCtaText: {
-    color: C.black,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  btnDisabled: {
-    width: '100%',
-    paddingVertical: 17,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: C.charcoal,
-    borderWidth: 1,
-    borderColor: C.line,
-  },
-  btnDisabledText: { color: C.gray500, fontSize: 16, fontWeight: '700' },
-  btnOutline: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: C.gray700,
-  },
-  btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
-
-  // ---------- AR Groq Scanner Styles ----------
+  // ---------- AR Groq Scanner ----------
   arScanBadge: {
-    backgroundColor: 'rgba(249,115,22,0.12)',
+    backgroundColor: C.orangeSoft,
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderColor: C.orangeBorder,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
     marginLeft: 8,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  arScanBadgeText: { color: C.orange, fontSize: 12, fontWeight: '800', marginLeft: 4 },
+  arScanBadgeText: { color: C.orange, fontSize: 12, fontWeight: '800', marginLeft: 5 },
   arScanBadgeIcon: { fontSize: 14 },
-  
+  arVignette: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: 90,
+    borderColor: 'rgba(0,0,0,0.35)',
+  },
   arTopBar: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 60 : 40,
@@ -2580,60 +2970,59 @@ const styles = StyleSheet.create({
     zIndex: 110,
   },
   arBadge: {
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.glassStrong,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 9,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: C.glassBorder,
   },
-  arBadgeText: { color: C.orange, fontWeight: '800', fontSize: 12, letterSpacing: 0.5 },
+  arBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange, marginRight: 8 },
+  arBadgeText: { color: C.white, fontWeight: '800', fontSize: 12, letterSpacing: 0.5 },
   arCloseBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: C.glassStrong,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: C.glassBorder,
   },
-  arCloseText: { color: C.white, fontSize: 18, fontWeight: '800' },
-  
-  arBottomBar: {
-    position: 'absolute',
-    bottom: 80,
-    left: 0,
-    right: 0,
+  arCloseText: { color: C.white, fontSize: 17, fontWeight: '800' },
+  arBottomBar: { position: 'absolute', bottom: 80, left: 0, right: 0, alignItems: 'center', zIndex: 110 },
+  arAnalyzing: {
     alignItems: 'center',
-    zIndex: 110,
+    backgroundColor: C.glassStrong,
+    paddingHorizontal: 26,
+    paddingVertical: 22,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
+  },
+  arAnalyzingText: { color: C.orange, marginTop: 14, fontSize: 15, fontWeight: '800' },
+  arHint: {
+    color: C.white,
+    marginBottom: 22,
+    fontSize: 14,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 10,
   },
   arCaptureBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 74,
+    height: 74,
+    borderRadius: 37,
     borderWidth: 4,
     borderColor: C.orange,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
-  arCaptureInner: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: C.orange,
-  },
-  
-  arViewfinder: {
-    position: 'absolute',
-    top: '25%',
-    left: '10%',
-    width: '80%',
-    height: '45%',
-    zIndex: 105,
-    overflow: 'hidden',
-  },
+  arCaptureInner: { width: 54, height: 54, borderRadius: 27, backgroundColor: C.orange },
+  arViewfinder: { position: 'absolute', top: '25%', left: '10%', width: '80%', height: '45%', zIndex: 105, overflow: 'hidden' },
   arLaser: {
     width: '100%',
     height: 2,
@@ -2644,8 +3033,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 10,
   },
-  arCornerTopLeft: { position: 'absolute', top: 0, left: 0, width: 40, height: 40, borderTopWidth: 4, borderLeftWidth: 4, borderColor: C.orange },
-  arCornerTopRight: { position: 'absolute', top: 0, right: 0, width: 40, height: 40, borderTopWidth: 4, borderRightWidth: 4, borderColor: C.orange },
-  arCornerBottomLeft: { position: 'absolute', bottom: 0, left: 0, width: 40, height: 40, borderBottomWidth: 4, borderLeftWidth: 4, borderColor: C.orange },
-  arCornerBottomRight: { position: 'absolute', bottom: 0, right: 0, width: 40, height: 40, borderBottomWidth: 4, borderRightWidth: 4, borderColor: C.orange },
+  arCornerTopLeft: { position: 'absolute', top: 0, left: 0, width: 40, height: 40, borderTopWidth: 4, borderLeftWidth: 4, borderColor: C.orange, borderTopLeftRadius: 8 },
+  arCornerTopRight: { position: 'absolute', top: 0, right: 0, width: 40, height: 40, borderTopWidth: 4, borderRightWidth: 4, borderColor: C.orange, borderTopRightRadius: 8 },
+  arCornerBottomLeft: { position: 'absolute', bottom: 0, left: 0, width: 40, height: 40, borderBottomWidth: 4, borderLeftWidth: 4, borderColor: C.orange, borderBottomLeftRadius: 8 },
+  arCornerBottomRight: { position: 'absolute', bottom: 0, right: 0, width: 40, height: 40, borderBottomWidth: 4, borderRightWidth: 4, borderColor: C.orange, borderBottomRightRadius: 8 },
 });

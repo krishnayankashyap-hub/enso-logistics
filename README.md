@@ -5,7 +5,7 @@
 <h3>🚚 A Decentralized, Zero-Waste Logistics Network https://enso-platform-one.vercel.app/ </h3>
 
 <p>
-Transforming unused vehicle space into an intelligent relay network for farmers, businesses, and supply chains.
+Transforming unused vehicle space into an intelligent relay network for farmers, businesses, and supply chains. Milk run Model
 </p>
 
 <p>
@@ -30,10 +30,10 @@ Every day thousands of trucks drive with **unused cargo capacity** while farmers
 
 | Traditional Logistics | Impact       |
 | --------------------- | ------------ |
-| Dedicated Truck       | 💸 High Cost |
-| Shared Transport      | ⏳ Delays     |
-| Produce Waiting       | 🍅 Spoilage  |
-| Empty Vehicle Space   | 🌍 Waste     |
+| Dedicated Truck       |  High Cost |
+| Shared Transport      |  Delays     |
+| Produce Waiting       |  Spoilage  |
+| Empty Vehicle Space   |  Waste     |
 
 A farmer in Assam shipping tomatoes to Shillong often loses profit before the shipment even arrives.
 
@@ -63,15 +63,15 @@ Our proprietary matching engine continuously scans active transit routes and ide
 
 ### Features
 
-🚚 Live Driver Discovery
+ Live Driver Discovery
 
-📍 Route Intelligence
+ Route Intelligence
 
-⚡ Real-Time Matching
+ Real-Time Matching
 
-💰 Dynamic Pricing
+ Dynamic Pricing
 
-🔔 60-Second Acceptance Window
+ 60-Second Acceptance Window
 
 ### Pricing Logic
 
@@ -103,19 +103,19 @@ Delivered
 
 ---
 
-# 📷 AR Volumetric Scanner
+#  AR Volumetric Scanner
 
 Instead of typing package dimensions manually:
 
-📱 Open Camera
+ Open Camera
 
-📦 Scan Package
+ Scan Package
 
-🧠 AI Generates 3D Bounding Box
+ AI Generates 3D Bounding Box
 
-📏 Calculate Dimensions
+ Calculate Dimensions
 
-⚖️ Estimate Volumetric Weight
+ Estimate Volumetric Weight
 
 ### Powered By
 
@@ -132,37 +132,13 @@ Instead of typing package dimensions manually:
 <tr>
 <td width="50%">
 
-### Sender Portal
+### Sender Portal (https://enso-sender.vercel.app/)
+### Driver Radar  (https://enso-driver.vercel.app/)
 
-✨ Glassmorphism UI
-
-📦 Create Shipments
-
-📍 Track Deliveries
-
-📊 Analytics Dashboard
-
-</td>
-
-<td width="50%">
-
-### Driver Radar
-
-🌙 Dark Mode Interface
-
-📡 Live Job Feed
-
-🧭 Navigation Support
-
-⚡ Status Updates
-
-</td>
-</tr>
-</table>
 
 ---
 
-# 🏗 Architecture
+#  Architecture
 
 ```text
                     FIREBASE

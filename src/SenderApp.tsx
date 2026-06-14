@@ -41,18 +41,11 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from './config/firebaseConfig';
+import { Feather } from '@expo/vector-icons';
 
 const { height } = Dimensions.get('window');
 
-// ==========================================
-// DESIGN TOKENS — ORANGE & BLACK · PREMIUM DARK "LIQUID GLASS"
-// The brand identity (orange #F97316 + black #0A0A0A) is preserved exactly.
-// Everything around it is elevated: layered charcoal surfaces, hairline
-// borders, frosted translucent glass, and a single warm accent. No gradients —
-// solid fills and translucency only.
-// ==========================================
 const C = {
-  // ---- Brand (unchanged) ----
   orange: '#F97316',
   orangeDark: '#EA580C',
   orangeSoft: 'rgba(249,115,22,0.12)',
@@ -69,7 +62,6 @@ const C = {
   gray400: '#A3A3A3',
   white: '#FFFFFF',
 
-  // ---- Extended dark surfaces (added depth) ----
   surface: '#141416',
   surfaceAlt: '#1B1B1E',
   field: 'rgba(255,255,255,0.055)',
@@ -79,7 +71,6 @@ const C = {
   textHi: '#FAFAFA',
   danger: '#F87171',
 
-  // ---- Glass surfaces ----
   glass: 'rgba(18,18,20,0.62)',
   glassStrong: 'rgba(16,16,18,0.80)',
   glassSheet: 'rgba(13,13,15,0.84)',
@@ -88,15 +79,11 @@ const C = {
   shadow: '#000000',
 };
 
-// Web-only frosted blur. No-op on native (translucent bg + hairline still reads
-// as frosted). For true native blur, add `expo-blur` and wrap these surfaces in
-// <BlurView tint="dark"> — see notes.
 const webGlass: any =
   Platform.OS === 'web'
     ? { backdropFilter: 'blur(22px) saturate(150%)', WebkitBackdropFilter: 'blur(22px) saturate(150%)' }
     : null;
 
-// Minimal dark Google-map style (Android). iOS uses Apple Maps and ignores this.
 const MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#0f0f10' }] },
   { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
@@ -113,18 +100,12 @@ const MAP_STYLE = [
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#05080d' }] },
 ];
 
-// Fallback pickup point if GPS is unavailable (Guwahati)
 const FALLBACK_COORDS = { latitude: 26.1445, longitude: 91.7362 };
 
 const ACTIVE_STATUSES = ['searching', 'accepted', 'picked_up'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// ==========================================
-// MILK-RUN LINE STOPS (ALL-INDIA RELAY NETWORK)
-// Nodes activate dynamically based on driver trajectories.
-// ==========================================
 const HIGHWAY_STOPS = [
-  // ---- NH-27 · Guwahati – Upper Assam line ----
   { name: 'Guwahati (ISBT)', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 26.1207, longitude: 91.6517 },
   { name: 'Jorabat Junction', group: 'NH-27 · Guwahati – Upper Assam', tag: 'NH-27 / NH-6 junction', latitude: 26.1147, longitude: 91.8859 },
   { name: 'Nagaon', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 26.3464, longitude: 92.684 },
@@ -134,14 +115,12 @@ const HIGHWAY_STOPS = [
   { name: 'Dibrugarh', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4728, longitude: 94.912 },
   { name: 'Tinsukia', group: 'NH-27 · Guwahati – Upper Assam', tag: 'Highway stop', latitude: 27.4922, longitude: 95.3468 },
 
-  // ---- NH-6 · Guwahati – Shillong line ----
   { name: 'Khanapara (Guwahati)', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 26.1158, longitude: 91.8266 },
   { name: 'Jorabat Junction ', group: 'NH-6 · Guwahati – Shillong', tag: 'NH-27 / NH-6 junction', latitude: 26.1147, longitude: 91.8859 },
   { name: 'Nongpoh', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 25.9035, longitude: 91.877 },
   { name: 'Umiam (Barapani)', group: 'NH-6 · Guwahati – Shillong', tag: 'Highway stop', latitude: 25.6635, longitude: 91.9117 },
   { name: 'Shillong (Police Bazar)', group: 'NH-6 · Guwahati – Shillong', tag: 'Line terminus', latitude: 25.5788, longitude: 91.8933 },
 
-  // ---- NH-44 · North-South Corridor (Automated Relay) ----
   { name: 'Srinagar (NH-44 Start)', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 34.0837, longitude: 74.7973 },
   { name: 'Pathankot Bypass', group: 'NH-44 · North-South Corridor', tag: 'Relay Node', latitude: 32.2687, longitude: 75.6455 },
   { name: 'Delhi (Kondli)', group: 'NH-44 · North-South Corridor', tag: 'Major Hub', latitude: 28.6139, longitude: 77.2090 },
@@ -152,7 +131,6 @@ const HIGHWAY_STOPS = [
   { name: 'Bengaluru (Electronic City)', group: 'NH-44 · North-South Corridor', tag: 'Major Hub', latitude: 12.8452, longitude: 77.6602 },
   { name: 'Kanyakumari (NH-44 End)', group: 'NH-44 · North-South Corridor', tag: 'Line terminus', latitude: 8.0883, longitude: 77.5385 },
 
-  // ---- NH-48 · Golden Quadrilateral West (Automated Relay) ----
   { name: 'Jaipur (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 26.9124, longitude: 75.7873 },
   { name: 'Ahmedabad (Ring Road)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 23.0225, longitude: 72.5714 },
   { name: 'Surat (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 21.1702, longitude: 72.8311 },
@@ -160,7 +138,6 @@ const HIGHWAY_STOPS = [
   { name: 'Pune (NH-48)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Relay Node', latitude: 18.5204, longitude: 73.8567 },
   { name: 'Chennai (NH-48 End)', group: 'NH-48 · Golden Quadrilateral West', tag: 'Line terminus', latitude: 13.0827, longitude: 80.2707 },
 
-  // ---- NH-19 · Golden Quadrilateral East (Automated Relay) ----
   { name: 'Kanpur (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 26.4499, longitude: 80.3319 },
   { name: 'Prayagraj (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 25.4358, longitude: 81.8463 },
   { name: 'Varanasi (NH-19)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Relay Node', latitude: 25.3176, longitude: 82.9739 },
@@ -168,10 +145,8 @@ const HIGHWAY_STOPS = [
   { name: 'Kolkata (NH-19 End)', group: 'NH-19 · Golden Quadrilateral East', tag: 'Major Hub', latitude: 22.5726, longitude: 88.3639 },
 ];
 
-// Dynamically extract groups to ensure no line is missed
 const LINE_GROUPS = Array.from(new Set(HIGHWAY_STOPS.map(stop => stop.group)));
 
-// Native-only modules (loaded safely so web doesn't crash)
 let MapView: any = null;
 let Marker: any = null;
 let Location: any = null;
@@ -182,7 +157,6 @@ if (Platform.OS !== 'web') {
   Location = require('expo-location');
 }
 
-// Cross-platform alert helper
 const notify = (title: string, message?: string) => {
   if (Platform.OS === 'web') {
     window.alert(message ? `${title}\n\n${message}` : title);
@@ -191,9 +165,6 @@ const notify = (title: string, message?: string) => {
   }
 };
 
-// Light, tasteful haptic for key presses. Android-only via the built-in
-// Vibration module to avoid the heavy default iOS buzz; for proper Taptic
-// feedback on iOS add `expo-haptics`.
 const haptic = () => {
   if (Platform.OS === 'android') {
     try {
@@ -202,7 +173,6 @@ const haptic = () => {
   }
 };
 
-// "12 Jun, 4:30 PM" — works everywhere, no Intl needed
 const formatDate = (ts: any) => {
   if (!ts?.toDate) return 'Just now';
   const d = ts.toDate();
@@ -213,14 +183,12 @@ const formatDate = (ts: any) => {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${h}:${mm} ${ampm}`;
 };
 
-// Friendly messages shown while we search for a driver
 const SEARCH_TIPS = [
   'Hold tight — we\u2019ll let you know the moment a driver accepts.',
   'Most requests are matched within a few minutes.',
   'Your request is live and visible to nearby drivers.',
 ];
 
-// Copy for each shipment status (the driver app will update `status`)
 const STATUS_COPY: Record<string, { title: string; subtitle: string }> = {
   searching: {
     title: 'Finding your driver\u2026',
@@ -244,7 +212,6 @@ const STATUS_COPY: Record<string, { title: string; subtitle: string }> = {
   },
 };
 
-// Badge colors for the Activity list
 const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
   searching: { label: 'Searching', color: C.orange, bg: C.orangeSoft },
   accepted: { label: 'Driver on way', color: C.orange, bg: C.orangeSoft },
@@ -253,29 +220,22 @@ const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }>
   cancelled: { label: 'Cancelled', color: C.gray500, bg: 'rgba(115,115,115,0.12)' },
 };
 
-// Ordered shipment lifecycle for the progress tracker
 const PROGRESS_STEPS = ['searching', 'accepted', 'picked_up', 'delivered'];
 const PROGRESS_LABELS = ['Request', 'Matched', 'Pickup', 'Delivered'];
 
 const TABS = [
-  { key: 'home', icon: '🏠', label: 'Home' },
-  { key: 'activity', icon: '🧾', label: 'Activity' },
-  { key: 'stops', icon: '🛣️', label: 'Stops' },
-  { key: 'profile', icon: '👤', label: 'Profile' },
+  { key: 'home', icon: 'home', label: 'Home' },
+  { key: 'activity', icon: 'file-text', label: 'Activity' },
+  { key: 'stops', icon: 'git-merge', label: 'Stops' },
+  { key: 'profile', icon: 'user', label: 'Profile' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
 type LatLng = { latitude: number; longitude: number };
 type ActivityFilter = 'all' | 'active' | 'delivered' | 'cancelled';
 
-// ==========================================
-// REUSABLE MICRO-INTERACTION PRIMITIVES
-// ==========================================
-
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Spring-scale pressable used for premium tactile feedback on buttons/cards.
-// Applies the style + transform to the touchable itself so flex layouts work.
 const PressableScale = ({
   style,
   children,
@@ -316,7 +276,6 @@ const PressableScale = ({
   );
 };
 
-// Shimmering skeleton block for loading states.
 const Shimmer = ({ style }: any) => {
   const t = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -333,7 +292,6 @@ const Shimmer = ({ style }: any) => {
   return <Animated.View style={[styles.skeleton, { opacity }, style]} />;
 };
 
-// Skeleton card matching the Activity list silhouette.
 const SkeletonCard = () => (
   <View style={styles.historyCard}>
     <View style={styles.historyTop}>
@@ -345,7 +303,6 @@ const SkeletonCard = () => (
   </View>
 );
 
-// Fade + lift mount animation for page transitions.
 const FadeInView = ({ children, style }: any) => {
   const a = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -364,23 +321,19 @@ const FadeInView = ({ children, style }: any) => {
 };
 
 export default function App() {
-  // --- AUTH STATE ---
   const [user, setUser] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Auth form state
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Shipment form state
   const [itemName, setItemName] = useState('');
   const [destination, setDestination] = useState('');
   const [cargoImage, setCargoImage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Pickup & drop points (Uber-style)
   const [pickupText, setPickupText] = useState('');
   const [pickupPoint, setPickupPoint] = useState<LatLng | null>(null);
   const [destPoint, setDestPoint] = useState<LatLng | null>(null);
@@ -388,53 +341,42 @@ export default function App() {
   const [pickingMode, setPickingMode] = useState<'pickup' | 'dest' | null>(null);
   const [pendingCenter, setPendingCenter] = useState<LatLng | null>(null);
 
-  // Live request tracking
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activePackage, setActivePackage] = useState<any>(null);
 
-  // Navigation + activity history + sheet
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [history, setHistory] = useState<any[]>([]);
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
 
-  // Presentation-only state powering the upgraded Activity / Stops explorers
   const [historyLoading, setHistoryLoading] = useState(true);
   const [activitySearch, setActivitySearch] = useState('');
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
   const [stopSearch, setStopSearch] = useState('');
   const [inputFocus, setInputFocus] = useState<string | null>(null);
 
-  // Real location
   const [coords, setCoords] = useState<LatLng | null>(null);
   const [locationDenied, setLocationDenied] = useState(false);
   const mapRef = useRef<any>(null);
   const mapIframeRef = useRef<any>(null);
 
-  // Responsive sizing (mobile → tablet → desktop / web)
   const { width: winW } = useWindowDimensions();
   const isWide = winW >= 720;
 
-  // Animations / rotating tips
   const pulse = useRef(new Animated.Value(1)).current;
-  const dashAnim = useRef(new Animated.Value(0)).current; // moving road dashes
-  const bobAnim = useRef(new Animated.Value(0)).current; // truck bounce
+  const dashAnim = useRef(new Animated.Value(0)).current; 
+  const bobAnim = useRef(new Animated.Value(0)).current; 
   const [tipIndex, setTipIndex] = useState(0);
 
-  // GROQ AR Scanner State
   const [isScanningAR, setIsScanningAR] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const scannerAnim = useRef(new Animated.Value(0)).current;
   const videoRef = useRef<any>(null);
   const [cameraStream, setCameraStream] = useState<any>(null);
 
-  // Derived
   const status: string | undefined = activePackage?.status;
   const isSearching = status === 'searching';
   const truckActive = isSearching || status === 'picked_up';
 
-  // ------------------------------------------
-  // 1. LISTEN FOR LOGIN SESSIONS
-  // ------------------------------------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -443,9 +385,6 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // ------------------------------------------
-  // 2. GET THE USER'S REAL GPS LOCATION
-  // ------------------------------------------
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -453,7 +392,7 @@ export default function App() {
     const getLocation = async () => {
       try {
         if (Platform.OS === 'web') {
-          // @ts-ignore - browser geolocation
+          // @ts-ignore
           navigator.geolocation?.getCurrentPosition(
             (pos: any) => {
               if (!cancelled) {
@@ -487,7 +426,6 @@ export default function App() {
     };
   }, [user]);
 
-  // Smoothly move the map to the user once we know where they are
   useEffect(() => {
     if (coords) {
       if (Platform.OS === 'web' && mapIframeRef.current) {
@@ -498,9 +436,6 @@ export default function App() {
     }
   }, [coords]);
 
-  // ------------------------------------------
-  // 3. UBER MAP LOGIC (WEB IFRAME COMMUNICATION)
-  // ------------------------------------------
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       try {
@@ -541,9 +476,6 @@ export default function App() {
     }
   }, [pickingMode]);
 
-  // ------------------------------------------
-  // 4. RESUME AN ACTIVE REQUEST AFTER APP RESTART
-  // ------------------------------------------
   useEffect(() => {
     if (!user) {
       setActiveId(null);
@@ -562,15 +494,11 @@ export default function App() {
         const snap = await getDocs(q);
         if (!snap.empty) setActiveId(snap.docs[0].id);
       } catch {
-        // Offline or index still building — safe to ignore
+        
       }
     })();
   }, [user]);
 
-  // ------------------------------------------
-  // 5. LIVE LISTENER — updates instantly when the
-  //    driver app changes this shipment's status
-  // ------------------------------------------
   useEffect(() => {
     if (!activeId) return;
     const unsub = onSnapshot(doc(db, 'Packages', activeId), (snap) => {
@@ -584,9 +512,6 @@ export default function App() {
     return unsub;
   }, [activeId]);
 
-  // ------------------------------------------
-  // 6. LIVE ACTIVITY — all of this user's shipments
-  // ------------------------------------------
   useEffect(() => {
     if (!user) {
       setHistory([]);
@@ -612,7 +537,6 @@ export default function App() {
     return unsub;
   }, [user]);
 
-  // Pulse animation + rotating tips while searching
   useEffect(() => {
     if (!isSearching) return;
     const anim = Animated.loop(
@@ -632,7 +556,6 @@ export default function App() {
     };
   }, [isSearching]);
 
-  // 🚚 Truck drive animation (road dashes slide + truck bobs)
   useEffect(() => {
     if (!truckActive) return;
     dashAnim.setValue(0);
@@ -661,9 +584,6 @@ export default function App() {
   const dashTranslate = dashAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -40] });
   const truckBob = bobAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
 
-  // ------------------------------------------
-  // 7. GROQ API REAL AR SCANNER INTEGRATION (Web RTC)
-  // ------------------------------------------
   const startARScan = async () => {
     Keyboard.dismiss();
     setIsScanningAR(true);
@@ -674,7 +594,6 @@ export default function App() {
       ])
     ).start();
 
-    // Activate Real Camera if on Web
     if (Platform.OS === 'web') {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -698,19 +617,18 @@ export default function App() {
 
   const processGroqVision = async () => {
     setIsAnalyzing(true);
-    let base64Image = 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'; // Default/Fallback image
+    let base64Image = 'https://images.unsplash.com/photo-1580674684081-77699ca1b794?q=80&w=2000&auto=format&fit=crop'; 
 
-    // If on web and camera is active, snap a real picture and heavily compress it to avoid 400 Payload Too Large
     if (Platform.OS === 'web' && videoRef.current) {
       try {
         const canvas = document.createElement('canvas');
-        const scale = Math.min(1, 400 / (videoRef.current.videoWidth || 640)); // Shrink to 400px width max
+        const scale = Math.min(1, 400 / (videoRef.current.videoWidth || 640)); 
         canvas.width = (videoRef.current.videoWidth || 640) * scale;
         canvas.height = (videoRef.current.videoHeight || 480) * scale;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-          base64Image = canvas.toDataURL('image/jpeg', 0.5); // 50% Quality compression
+          base64Image = canvas.toDataURL('image/jpeg', 0.5); 
         }
       } catch (e) {
         console.log("Failed to capture from video stream, using fallback.");
@@ -718,7 +636,6 @@ export default function App() {
     }
 
     try {
-      // Real API Call to Groq's active Vision Model
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -765,7 +682,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.log('Groq API Error:', err);
-      // Fallback in case API is temporarily unavailable or payload is still too large
+      
       setItemName('L-Crate: 60x40x40cm (Volumetric 19kg)');
       setCargoImage(base64Image);
       notify('Groq Vision Issue', `Could not process image through API. Used fallback sizing. Reason: ${err.message || 'Unknown'}`);
@@ -775,11 +692,7 @@ export default function App() {
     }
   };
 
-  // ------------------------------------------
-  // 8. LOCATION HELPERS (Uber/Rapido-style)
-  // ------------------------------------------
 
-  // Turn coordinates into a readable name using the device geocoder (no API key needed)
   const reverseGeocode = async (point: LatLng): Promise<string | null> => {
     try {
       if (Platform.OS === 'web' || !Location) return null;
@@ -794,9 +707,8 @@ export default function App() {
     }
   };
 
-  // Fit both pins on screen, or fly to a single point
   const focusMap = (a?: LatLng | null, b?: LatLng | null) => {
-    // If Web, send the postMessage to Leaflet iframe
+    
     if (Platform.OS === 'web') {
       if (mapIframeRef.current) {
         if (a && b) {
@@ -808,7 +720,6 @@ export default function App() {
       return;
     }
 
-    // If Native App, animate MapView
     if (!mapRef.current) return;
     if (a && b) {
       mapRef.current.fitToCoordinates([a, b], {
@@ -820,14 +731,12 @@ export default function App() {
     }
   };
 
-  // Re-center the map on the user's current location (floating locate control)
   const recenter = () => {
     const target = coords ?? FALLBACK_COORDS;
     haptic();
     focusMap(target);
   };
 
-  // User tapped a highway-stop suggestion while typing
   const selectStop = (stop: (typeof HIGHWAY_STOPS)[number], which: 'pickup' | 'dest') => {
     const point = { latitude: stop.latitude, longitude: stop.longitude };
     if (which === 'pickup') {
@@ -843,7 +752,6 @@ export default function App() {
     Keyboard.dismiss();
   };
 
-  // Enter "move the map" pin mode
   const startPicking = (which: 'pickup' | 'dest') => {
     Keyboard.dismiss();
     setFocusField(null);
@@ -852,7 +760,6 @@ export default function App() {
       (which === 'pickup' ? pickupPoint : destPoint) ?? coords ?? FALLBACK_COORDS;
     setPendingCenter(start);
 
-    // Only animate region if it's the native map view
     if (Platform.OS !== 'web') {
       mapRef.current?.animateToRegion(
         { ...start, latitudeDelta: 0.01, longitudeDelta: 0.01 },
@@ -865,11 +772,9 @@ export default function App() {
     }
   };
 
-  // Confirm the pin where the map is centered
   const confirmPin = async () => {
     if (!pickingMode || !pendingCenter) return;
 
-    // On Web, reverse geocode isn't supported natively, provide a highly accurate generated tag
     const label =
       (await reverseGeocode(pendingCenter)) ??
       `Pinned Highway Node (${pendingCenter.latitude.toFixed(4)}, ${pendingCenter.longitude.toFixed(4)})`;
@@ -888,9 +793,6 @@ export default function App() {
 
   const cancelPicking = () => setPickingMode(null);
 
-  // ------------------------------------------
-  // 9. PRECISE GEOCODING (TYPE TO PIN)
-  // ------------------------------------------
   const geocodeAndPin = async (address: string, which: 'pickup' | 'dest') => {
     if (!address.trim()) return;
     Keyboard.dismiss();
@@ -901,7 +803,7 @@ export default function App() {
         const lat = parseFloat(data[0].lat);
         const lon = parseFloat(data[0].lon);
         const pt = { latitude: lat, longitude: lon };
-        const locationName = data[0].display_name.split(',')[0]; // Get the cleanest short name
+        const locationName = data[0].display_name.split(',')[0]; 
 
         if (which === 'pickup') {
           setPickupPoint(pt);
@@ -922,22 +824,17 @@ export default function App() {
     }
   };
 
-  // Open turn-by-turn navigation in Google Maps
   const openNavigation = () => {
     const target = activePackage?.pickup_coords;
     if (!target) {
       notify('No coordinates', 'This stop has no pinned location to navigate to.');
       return;
     }
-    // Launch actual Google Maps navigation route directly to coordinates
     Linking.openURL(
       `https://www.google.com/maps/dir/?api=1&destination=...${target.latitude},${target.longitude}`
     );
   };
 
-  // ------------------------------------------
-  // 10. FIREBASE AUTHENTICATION
-  // ------------------------------------------
   const handleAuthentication = async () => {
     if (!email || !password) {
       notify('Missing details', 'Enter both your email and password to continue.');
@@ -963,9 +860,6 @@ export default function App() {
     await signOut(auth);
   };
 
-  // ------------------------------------------
-  // 11. CREATE THE PICKUP REQUEST
-  // ------------------------------------------
   const requestPickup = async () => {
     if (!itemName || !destination || !user) return;
     setIsSubmitting(true);
@@ -987,7 +881,7 @@ export default function App() {
         driver_name: null,
         created_at: serverTimestamp(),
       });
-      setActiveId(docRef.id); // switches the sheet into "searching" mode
+      setActiveId(docRef.id); 
       setItemName('');
       setDestination('');
       setDestPoint(null);
@@ -1014,7 +908,6 @@ export default function App() {
     setActivePackage(null);
   };
 
-  // Tap an activity item that's still active → jump back to its live card
   const openHistoryItem = (item: any) => {
     if (ACTIVE_STATUSES.includes(item.status)) {
       setActiveId(item.id);
@@ -1023,9 +916,6 @@ export default function App() {
     }
   };
 
-  // ==========================================
-  // VIEW: SPLASH
-  // ==========================================
   if (isInitializing) {
     return (
       <View style={styles.center}>
@@ -1041,9 +931,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // VIEW: LOGIN / SIGN UP
-  // ==========================================
   if (!user) {
     return (
       <KeyboardAvoidingView
@@ -1061,7 +948,7 @@ export default function App() {
 
           <Text style={styles.inputLabel}>Email</Text>
           <View style={[styles.inputBox, inputFocus === 'email' && styles.inputBoxFocused]}>
-            <Text style={styles.inputGlyph}>✉</Text>
+            <Feather name="mail" size={16} color={C.gray500} style={{ marginRight: 12 }} />
             <TextInput
               style={styles.inputField}
               placeholder="you@example.com"
@@ -1082,7 +969,7 @@ export default function App() {
 
           <Text style={styles.inputLabel}>Password</Text>
           <View style={[styles.inputBox, inputFocus === 'password' && styles.inputBoxFocused]}>
-            <Text style={styles.inputGlyph}>⚷</Text>
+            <Feather name="lock" size={16} color={C.gray500} style={{ marginRight: 12 }} />
             <TextInput
               style={styles.inputField}
               placeholder="••••••••"
@@ -1142,9 +1029,6 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // VIEW: MAIN APP
-  // ==========================================
   const formReady = !!itemName.trim() && !!destination.trim();
   const mapCenter = coords ?? FALLBACK_COORDS;
   const statusCopy = status ? STATUS_COPY[status] ?? null : null;
@@ -1155,7 +1039,6 @@ export default function App() {
   const activeCount = history.filter((h) => ACTIVE_STATUSES.includes(h.status)).length;
   const stepIndex = status ? PROGRESS_STEPS.indexOf(status) : -1;
 
-  // Highway-stop suggestions while typing (deduped by name)
   const suggQuery = focusField === 'pickup' ? pickupText : focusField === 'dest' ? destination : '';
   const suggestions =
     focusField && suggQuery.trim().length > 0
@@ -1166,7 +1049,6 @@ export default function App() {
           .slice(0, 4)
       : [];
 
-  // ---- Activity explorer: client-side search + filter + date grouping ----
   const activityQuery = activitySearch.trim().toLowerCase();
   const filteredHistory = history.filter((h) => {
     const matchesQuery =
@@ -1209,7 +1091,6 @@ export default function App() {
     { key: 'cancelled', label: 'Cancelled' },
   ];
 
-  // ---- Stops explorer: client-side search across the relay network ----
   const stopQuery = stopSearch.trim().toLowerCase();
   const filteredStops = HIGHWAY_STOPS.filter(
     (s) =>
@@ -1220,7 +1101,6 @@ export default function App() {
   );
   const visibleGroups = LINE_GROUPS.filter((g) => filteredStops.some((s) => s.group === g));
 
-  // Generate Leaflet Interactive Map HTML for Web
   const leafletMapHtml = `
     <!DOCTYPE html>
     <html>
@@ -1257,17 +1137,15 @@ export default function App() {
         let pickupMarker = null;
         let dropMarker = null;
         let driverMarker = null;
-        const driverIcon = L.divIcon({ html: '<div style="font-size:18px; background:#fff; border-radius:50%; width:34px; height:34px; display:flex; justify-content:center; align-items:center; box-shadow:0 6px 16px rgba(0,0,0,0.5)">🛻</div>', className: '', iconSize: [34, 34], iconAnchor: [17, 17] });
+        const driverIcon = L.divIcon({ html: '<div style="font-size:18px; background:#fff; border-radius:50%; width:34px; height:34px; display:flex; justify-content:center; align-items:center; box-shadow:0 6px 16px rgba(0,0,0,0.5)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg></div>', className: '', iconSize: [34, 34], iconAnchor: [17, 17] });
         const orangeIcon = L.divIcon({ html: '<div style="width:22px; height:22px; border-radius:50%; background:#F97316; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
         const blackIcon = L.divIcon({ html: '<div style="width:20px; height:20px; border-radius:6px; background:#fff; border:3px solid #0a0a0a; box-shadow:0 4px 12px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [20, 20], iconAnchor: [10, 10] });
 
-        // Update React on Drag
         map.on('move', () => {
           const center = map.getCenter();
           window.parent.postMessage(JSON.stringify({ type: 'mapCenter', lat: center.lat, lng: center.lng }), '*');
         });
 
-        // Listen for React Commands
         window.addEventListener('message', (event) => {
           try {
             const data = JSON.parse(event.data);
@@ -1306,7 +1184,6 @@ export default function App() {
         translucent
       />
 
-      {/* ---------- FULL-SCREEN SCROLLABLE MAP (always mounted) ---------- */}
       {Platform.OS === 'web' ? (
         <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]}>
           {/* @ts-ignore */}
@@ -1337,7 +1214,6 @@ export default function App() {
             }
           }}
         >
-          {/* Driver live pin (Sender side) */}
           {activePackage?.driver_coords && (
             <Marker
               coordinate={{
@@ -1349,11 +1225,10 @@ export default function App() {
               zIndex={1000}
             >
               <View style={styles.driverPin}>
-                <Text style={{ fontSize: 18 }}>🛻</Text>
+                <Feather name="truck" size={18} color={C.black} />
               </View>
             </Marker>
           )}
-          {/* Active Job Pickup Pin (if active package exists) */}
           {!pickupPoint && activePackage?.pickup_coords && (
              <Marker
               coordinate={{
@@ -1364,7 +1239,6 @@ export default function App() {
               pinColor={C.orange}
             />
           )}
-          {/* Active Job Drop Pin */}
           {!destPoint && activePackage?.dropoff_coords && (
              <Marker
               coordinate={{
@@ -1375,7 +1249,6 @@ export default function App() {
               pinColor={C.black}
             />
           )}
-          {/* Form Pickup pin */}
           {!activePackage && pickupPoint && (
             <Marker
               coordinate={pickupPoint}
@@ -1384,7 +1257,6 @@ export default function App() {
               pinColor={C.orange}
             />
           )}
-          {/* Form Drop pin */}
           {!activePackage && destPoint && (
             <Marker
               coordinate={destPoint}
@@ -1396,7 +1268,6 @@ export default function App() {
         </MapView>
       )}
 
-      {/* ---------- WEB MAP OVERLAY (Non-blocking visual tint) ---------- */}
       {pickingMode && Platform.OS === 'web' && (
         <View
           pointerEvents="none"
@@ -1404,7 +1275,6 @@ export default function App() {
         />
       )}
 
-      {/* ---------- CENTER PIN while choosing on native map ---------- */}
       {pickingMode && Platform.OS !== 'web' && (
         <View pointerEvents="none" style={[styles.centerPinWrap, { zIndex: 15 }]}>
           <View style={styles.centerPinHalo} />
@@ -1413,7 +1283,6 @@ export default function App() {
         </View>
       )}
 
-      {/* ---------- FLOATING GLASS HEADER (home only) ---------- */}
       {activeTab === 'home' && !pickingMode && !isScanningAR && (
         <View style={styles.header} pointerEvents="box-none">
           <View style={[styles.logoBadge, webGlass]}>
@@ -1435,7 +1304,6 @@ export default function App() {
         </View>
       )}
 
-      {/* ---------- FLOATING LOCATE CONTROL (home, map free) ---------- */}
       {activeTab === 'home' && sheetCollapsed && !pickingMode && !isScanningAR && (
         <PressableScale
           style={[styles.locateBtn, webGlass]}
@@ -1443,15 +1311,13 @@ export default function App() {
           accessibilityLabel="Center on my location"
           scaleTo={0.9}
         >
-          <Text style={styles.locateIcon}>◎</Text>
+          <Feather name="navigation" size={19} color={C.orange} />
         </PressableScale>
       )}
 
-      {/* ---------- GROQ AR SCANNER FULLSCREEN OVERLAY ---------- */}
       {isScanningAR && (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.black, zIndex: 100 }]}>
            <View style={{ position: 'absolute', inset: 0, opacity: 1 } as any}>
-             {/* If Web, render HTML5 Video. If Native, fallback to simulated image */}
              {Platform.OS === 'web' ? (
                 // @ts-ignore
                 <video
@@ -1469,34 +1335,29 @@ export default function App() {
              )}
            </View>
 
-           {/* Subtle vignette for legibility */}
            <View pointerEvents="none" style={styles.arVignette} />
 
-           {/* AR Viewfinder UI */}
            <View style={styles.arViewfinder} pointerEvents="none">
               <View style={styles.arCornerTopLeft} />
               <View style={styles.arCornerTopRight} />
               <View style={styles.arCornerBottomLeft} />
               <View style={styles.arCornerBottomRight} />
 
-              {/* Scanning Laser Animation */}
               {!isAnalyzing && (
                 <Animated.View style={[styles.arLaser, { transform: [{ translateY: scannerAnim.interpolate({inputRange: [0,1], outputRange: [0, height * 0.45]}) }] }]} />
               )}
            </View>
 
-           {/* Top Bar */}
            <View style={styles.arTopBar}>
               <View style={[styles.arBadge, webGlass]}>
                 <View style={styles.arBadgeDot} />
                 <Text style={styles.arBadgeText}>Groq Vision · Cargo AI</Text>
               </View>
               <PressableScale onPress={stopCamera} style={[styles.arCloseBtn, webGlass]} accessibilityLabel="Close scanner" scaleTo={0.9}>
-                 <Text style={styles.arCloseText}>✕</Text>
+                 <Feather name="x" size={18} color={C.white} />
               </PressableScale>
            </View>
 
-           {/* Bottom Bar Actions */}
            <View style={styles.arBottomBar} pointerEvents="box-none">
               {isAnalyzing ? (
                  <View style={[styles.arAnalyzing, webGlass]}>
@@ -1515,7 +1376,6 @@ export default function App() {
         </View>
       )}
 
-      {/* ---------- PIN-PICKING OVERLAY ---------- */}
       {pickingMode && (
         <>
           <View style={[styles.pickChip, webGlass]}>
@@ -1551,7 +1411,6 @@ export default function App() {
         </>
       )}
 
-      {/* ---------- BOTTOM SHEET (home only) ---------- */}
       {activeTab === 'home' && !pickingMode && !isScanningAR && (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1559,7 +1418,6 @@ export default function App() {
           pointerEvents="box-none"
         >
           <View style={[styles.bottomSheet, webGlass]}>
-            {/* Tap the handle to collapse the sheet and free the map */}
             <TouchableOpacity
               style={styles.dragHandleTap}
               onPress={() => {
@@ -1576,7 +1434,6 @@ export default function App() {
 
             <View style={[styles.sheetInner, isWide && styles.sheetInnerWide]}>
             {sheetCollapsed ? (
-              /* ================= COLLAPSED BAR ================= */
               <PressableScale
                 style={styles.collapsedRow}
                 onPress={() => setSheetCollapsed(false)}
@@ -1595,12 +1452,11 @@ export default function App() {
                   <>
                     <View style={styles.dotOrange} />
                     <Text style={styles.collapsedText}>Send a shipment</Text>
-                    <Text style={styles.collapsedAction}>＋</Text>
+                    <Feather name="plus" size={18} color={C.orange} />
                   </>
                 )}
               </PressableScale>
             ) : showLiveCard ? (
-              /* ================= LIVE REQUEST CARD ================= */
               <View>
                 <View style={styles.statusHeader}>
                   {status === 'searching' ? (
@@ -1645,7 +1501,6 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Progress tracker — modern shipment timeline */}
                 {status !== 'cancelled' && stepIndex >= 0 && (
                   <View style={styles.progressWrap}>
                     <View style={styles.progressTrack}>
@@ -1674,7 +1529,6 @@ export default function App() {
                   </View>
                 )}
 
-                {/* 🚚 Animated truck while searching / in transit */}
                 {truckActive && (
                   <View style={styles.roadScene}>
                     <View style={styles.roadLineWrap}>
@@ -1692,16 +1546,15 @@ export default function App() {
                         { transform: [{ translateY: truckBob }, { scaleX: -1 }] },
                       ]}
                     >
-                      🚚
+                      <Feather name="truck" size={26} color={C.white} />
                     </Animated.Text>
-                    <Text style={styles.roadPin}>📍</Text>
+                    <Feather name="map-pin" size={16} color={C.gray500} style={{ position: 'absolute', right: 16, top: 14 }} />
                   </View>
                 )}
 
-                {/* Shipment summary */}
                 <View style={styles.summaryCard}>
                   <View style={styles.summaryRow}>
-                    <Text style={styles.summaryIcon}>📦</Text>
+                    <Feather name="package" size={14} color={C.gray400} style={{ width: 14, textAlign: 'center' }} />
                     <Text style={styles.summaryText} numberOfLines={1}>
                       {activePackage.item_name}
                     </Text>
@@ -1722,7 +1575,6 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Actions */}
                 {status === 'searching' ? (
                   <PressableScale
                     style={styles.btnOutline}
@@ -1746,13 +1598,12 @@ export default function App() {
                       onPress={openNavigation}
                       accessibilityLabel="Route to pickup"
                     >
-                      <Text style={styles.btnNavigateText}>🧭  Route to pickup</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}><Feather name="navigation" size={15} color={C.white} style={{ marginRight: 8 }} /><Text style={styles.btnNavigateText}>Route to pickup</Text></View>
                     </PressableScale>
                   </View>
                 )}
               </View>
             ) : (
-              /* ================= REQUEST FORM ================= */
               <View>
                 <View style={styles.titleRow}>
                   <Text style={styles.sheetTitle}>Send a shipment</Text>
@@ -1762,9 +1613,8 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Pickup GPS status */}
                 <View style={styles.locationRow}>
-                  <Text style={styles.locationIcon}>◉</Text>
+                  <Feather name="navigation" size={13} color={C.orange} style={{ marginRight: 9 }} />
                   <Text style={styles.locationText}>
                     {coords
                       ? 'GPS locked — pickup defaults to your current location'
@@ -1776,7 +1626,7 @@ export default function App() {
 
                 <Text style={styles.fieldLabel}>What are you sending?</Text>
                 <View style={[styles.fieldBox, inputFocus === 'item' && styles.fieldBoxFocused]}>
-                  <Text style={styles.fieldIcon}>📦</Text>
+                  <Feather name="package" size={17} color={C.gray400} />
                   <TextInput
                     style={[styles.fieldInput, { flex: 1 }]}
                     placeholder="e.g. 5 kg box of documents"
@@ -1791,9 +1641,8 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
-                  {/* AR Scan Button Injection */}
                   <PressableScale style={styles.arScanBadge} onPress={startARScan} accessibilityLabel="Scan cargo with AR">
-                     <Text style={styles.arScanBadgeIcon}>👁️</Text>
+                     <Feather name="maximize" size={13} color={C.orange} />
                      <Text style={styles.arScanBadgeText}>AR Scan</Text>
                   </PressableScale>
                 </View>
@@ -1818,14 +1667,13 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
-                  {/* Precise Geocoding Search Button */}
                   <PressableScale
                     style={styles.pinBtn}
                     onPress={() => geocodeAndPin(pickupText, 'pickup')}
                     accessibilityLabel="Search pickup address"
                     scaleTo={0.9}
                   >
-                    <Text style={styles.pinBtnText}>🔍</Text>
+                    <Feather name="search" size={16} color={C.gray400} />
                   </PressableScale>
                   <PressableScale
                     style={styles.pinBtn}
@@ -1833,7 +1681,7 @@ export default function App() {
                     accessibilityLabel="Drop pin for pickup"
                     scaleTo={0.9}
                   >
-                    <Text style={styles.pinBtnText}>📍</Text>
+                    <Feather name="map-pin" size={16} color={C.gray400} />
                   </PressableScale>
                 </View>
                 {focusField === 'pickup' && suggestions.length > 0 && (
@@ -1847,7 +1695,7 @@ export default function App() {
                         accessibilityRole="button"
                         accessibilityLabel={`Use ${s.name.trim()} as pickup`}
                       >
-                        <Text style={styles.suggPin}>📍</Text>
+                        <Feather name="map-pin" size={14} color={C.gray500} style={{ marginRight: 12 }} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.suggName}>{s.name.trim()}</Text>
                           <Text style={styles.suggTag}>
@@ -1880,14 +1728,13 @@ export default function App() {
                     // @ts-ignore
                     outlineStyle="none"
                   />
-                  {/* Precise Geocoding Search Button */}
                   <PressableScale
                     style={styles.pinBtn}
                     onPress={() => geocodeAndPin(destination, 'dest')}
                     accessibilityLabel="Search drop address"
                     scaleTo={0.9}
                   >
-                    <Text style={styles.pinBtnText}>🔍</Text>
+                    <Feather name="search" size={16} color={C.gray400} />
                   </PressableScale>
                   <PressableScale
                     style={styles.pinBtn}
@@ -1895,7 +1742,7 @@ export default function App() {
                     accessibilityLabel="Drop pin for destination"
                     scaleTo={0.9}
                   >
-                    <Text style={styles.pinBtnText}>📍</Text>
+                    <Feather name="map-pin" size={16} color={C.gray400} />
                   </PressableScale>
                 </View>
                 {focusField === 'dest' && suggestions.length > 0 && (
@@ -1909,7 +1756,7 @@ export default function App() {
                         accessibilityRole="button"
                         accessibilityLabel={`Use ${s.name.trim()} as destination`}
                       >
-                        <Text style={styles.suggPin}>📍</Text>
+                        <Feather name="map-pin" size={14} color={C.gray500} style={{ marginRight: 12 }} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.suggName}>{s.name.trim()}</Text>
                           <Text style={styles.suggTag}>
@@ -1943,7 +1790,6 @@ export default function App() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ======================= ACTIVITY TAB ======================= */}
       {activeTab === 'activity' && (
         <View style={styles.screen}>
           <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide]}>
@@ -1954,9 +1800,8 @@ export default function App() {
               : `${history.length} shipment${history.length === 1 ? '' : 's'}`}
           </Text>
 
-          {/* Search */}
           <View style={[styles.searchBar, inputFocus === 'activitySearch' && styles.searchBarFocused]}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Feather name="search" size={15} color={C.gray500} style={{ marginRight: 10, opacity: 0.8 }} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search item, pickup or destination"
@@ -1977,12 +1822,11 @@ export default function App() {
                 accessibilityRole="button"
                 accessibilityLabel="Clear search"
               >
-                <Text style={styles.searchClear}>✕</Text>
+                <Feather name="x" size={15} color={C.gray500} style={{ paddingLeft: 8 }} />
               </TouchableOpacity>
             )}
           </View>
 
-          {/* Filters */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -2018,7 +1862,7 @@ export default function App() {
           ) : history.length === 0 ? (
             <View style={styles.emptyWrap}>
               <View style={styles.emptyBadge}>
-                <Text style={styles.emptyEmoji}>📦</Text>
+                <Feather name="package" size={34} color={C.gray500} />
               </View>
               <Text style={styles.emptyTitle}>No shipments yet</Text>
               <Text style={styles.emptySub}>
@@ -2072,7 +1916,7 @@ export default function App() {
                         </Text>
                         <View style={styles.historyBottom}>
                           <Text style={styles.historyDate}>{formatDate(item.created_at)}</Text>
-                          {isActive && <Text style={styles.historyTrack}>Track →</Text>}
+                          {isActive && <View style={{ flexDirection: 'row', alignItems: 'center' }}><Text style={styles.historyTrack}>Track</Text><Feather name="chevron-right" size={14} color={C.orange} style={{ marginLeft: 1 }} /></View>}
                         </View>
                       </PressableScale>
                     );
@@ -2085,16 +1929,14 @@ export default function App() {
         </View>
       )}
 
-      {/* ======================= STOPS TAB (ALL-INDIA) ======================= */}
       {activeTab === 'stops' && (
         <View style={styles.screen}>
           <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide]}>
           <Text style={styles.screenTitle}>Line stops</Text>
           <Text style={styles.screenSub}>Pan-India relay nodes on the Enso network</Text>
 
-          {/* Search */}
           <View style={[styles.searchBar, inputFocus === 'stopSearch' && styles.searchBarFocused]}>
-            <Text style={styles.searchIcon}>🔍</Text>
+            <Feather name="search" size={15} color={C.gray500} style={{ marginRight: 10, opacity: 0.8 }} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search a stop, hub or corridor"
@@ -2115,7 +1957,7 @@ export default function App() {
                 accessibilityRole="button"
                 accessibilityLabel="Clear search"
               >
-                <Text style={styles.searchClear}>✕</Text>
+                <Feather name="x" size={15} color={C.gray500} style={{ paddingLeft: 8 }} />
               </TouchableOpacity>
             )}
           </View>
@@ -2162,12 +2004,12 @@ export default function App() {
                         scaleTo={0.99}
                         accessibilityLabel={`Send to ${stop.name.trim()}`}
                       >
-                        <Text style={styles.stopPin}>📍</Text>
+                        <Feather name="map-pin" size={15} color={C.gray500} style={{ marginRight: 12 }} />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.stopName}>{stop.name.trim()}</Text>
                           <Text style={styles.stopTag}>{stop.tag}</Text>
                         </View>
-                        <Text style={styles.stopAction}>Send here →</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}><Text style={styles.stopAction}>Send here</Text><Feather name="chevron-right" size={15} color={C.orange} style={{ marginLeft: 2 }} /></View>
                       </PressableScale>
                     ))}
                   </View>
@@ -2179,7 +2021,6 @@ export default function App() {
         </View>
       )}
 
-      {/* ======================= PROFILE TAB ======================= */}
       {activeTab === 'profile' && (
         <View style={styles.screen}>
           <FadeInView style={[styles.screenInner, isWide && styles.screenInnerWide, { flex: 1 }]}>
@@ -2229,7 +2070,6 @@ export default function App() {
         </View>
       )}
 
-      {/* ======================= FLOATING GLASS NAVBAR ======================= */}
       {!pickingMode && !isScanningAR && (
         <View style={styles.navbarWrap} pointerEvents="box-none">
           <View style={[styles.navbar, webGlass]}>
@@ -2249,7 +2089,7 @@ export default function App() {
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={tab.label}
                 >
-                  <Text style={[styles.navIcon, !active && { opacity: 0.42 }]}>{tab.icon}</Text>
+                  <Feather name={tab.icon as any} size={20} color={active ? C.orange : C.gray500} style={{ marginBottom: 3 }} />
                   <Text style={[styles.navLabel, active && styles.navLabelActive]}>
                     {tab.label}
                   </Text>
@@ -2263,9 +2103,6 @@ export default function App() {
   );
 }
 
-// ==========================================
-// STYLES — ORANGE & BLACK · PREMIUM DARK GLASS
-// ==========================================
 const styles = StyleSheet.create({
   center: {
     flex: 1,
@@ -2305,7 +2142,6 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // ---------- Auth ----------
   authContainer: {
     flex: 1,
     backgroundColor: C.black,
@@ -2367,7 +2203,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  // ---------- App shell ----------
   appRoot: { flex: 1, backgroundColor: C.black },
   header: {
     position: 'absolute',
@@ -2421,7 +2256,6 @@ const styles = StyleSheet.create({
   },
   avatarBadgeText: { color: C.orange, fontSize: 16, fontWeight: '800' },
 
-  // ---------- Floating locate control ----------
   locateBtn: {
     position: 'absolute',
     right: 20,
@@ -2443,7 +2277,6 @@ const styles = StyleSheet.create({
   },
   locateIcon: { color: C.orange, fontSize: 22, fontWeight: '700', marginTop: -1 },
 
-  // ---------- Center pin (native picking) ----------
   centerPinWrap: {
     position: 'absolute',
     top: '50%',
@@ -2460,7 +2293,6 @@ const styles = StyleSheet.create({
   centerPinDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.orange, borderWidth: 3, borderColor: C.black },
   centerPinShadow: { position: 'absolute', bottom: 8, width: 12, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.4)' },
 
-  // ---------- Pin-picking overlay ----------
   pickChip: {
     position: 'absolute',
     top: Platform.OS === 'ios' ? 62 : 50,
@@ -2522,7 +2354,6 @@ const styles = StyleSheet.create({
   },
   pickConfirmText: { color: C.black, fontSize: 14, fontWeight: '800' },
 
-  // ---------- Bottom sheet ----------
   sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 },
   bottomSheet: {
     width: '100%',
@@ -2560,7 +2391,6 @@ const styles = StyleSheet.create({
   dotOrange: { width: 11, height: 11, borderRadius: 6, backgroundColor: C.orange },
   dotWhite: { width: 11, height: 11, borderRadius: 3, backgroundColor: C.white },
 
-  // ---------- Request form ----------
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sheetTitle: { fontSize: 23, fontWeight: '800', color: C.white, letterSpacing: -0.5 },
   relayBadge: {
@@ -2609,9 +2439,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 9,
     borderRadius: 12,
-    backgroundColor: C.orangeSoft,
+    backgroundColor: C.field,
     borderWidth: 1,
-    borderColor: C.orangeBorder,
+    borderColor: C.hairline,
     marginLeft: 8,
     minWidth: 40,
     alignItems: 'center',
@@ -2640,7 +2470,6 @@ const styles = StyleSheet.create({
   suggName: { color: C.white, fontSize: 14, fontWeight: '700' },
   suggTag: { color: C.gray500, fontSize: 11, fontWeight: '500', marginTop: 2 },
 
-  // ---------- Live status card ----------
   statusHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
   pulseWrap: { width: 48, height: 48, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
   pulseRing: { position: 'absolute', width: 30, height: 30, borderRadius: 15, backgroundColor: C.orangeSoftStrong },
@@ -2658,7 +2487,6 @@ const styles = StyleSheet.create({
   statusTitle: { fontSize: 20, fontWeight: '800', color: C.white, letterSpacing: -0.3, marginBottom: 4 },
   statusSubtitle: { fontSize: 13, color: C.gray400, fontWeight: '500', lineHeight: 18 },
 
-  // ---------- Progress tracker ----------
   progressWrap: { marginBottom: 16 },
   progressTrack: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   progressSeg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: C.line, marginLeft: 6 },
@@ -2667,7 +2495,6 @@ const styles = StyleSheet.create({
   progressLabel: { flex: 1, color: C.gray600, fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textAlign: 'center' },
   progressLabelOn: { color: C.orange },
 
-  // ---------- Animated road ----------
   roadScene: {
     height: 64,
     backgroundColor: C.surface,
@@ -2696,7 +2523,6 @@ const styles = StyleSheet.create({
   summaryIcon: { fontSize: 13, width: 14, textAlign: 'center' },
   summaryText: { color: C.white, fontSize: 15, fontWeight: '600', marginLeft: 12, flex: 1 },
 
-  // ---------- Buttons ----------
   actionRow: { flexDirection: 'row', gap: 12 },
   btnNavigate: {
     flex: 1,
@@ -2746,7 +2572,6 @@ const styles = StyleSheet.create({
   },
   btnOutlineText: { color: C.gray400, fontSize: 15, fontWeight: '700' },
 
-  // ---------- Activity / Stops / Profile screens ----------
   screen: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: C.black,
@@ -2759,7 +2584,6 @@ const styles = StyleSheet.create({
   screenTitle: { fontSize: 31, fontWeight: '800', color: C.white, letterSpacing: -0.8 },
   screenSub: { fontSize: 14, color: C.gray500, fontWeight: '500', marginTop: 4, marginBottom: 20 },
 
-  // ---------- Search + filters ----------
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2807,7 +2631,6 @@ const styles = StyleSheet.create({
   },
   miniEmptyText: { color: C.gray500, fontSize: 14, fontWeight: '500', textAlign: 'center' },
 
-  // ---------- Empty states ----------
   emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 140 },
   emptyBadge: {
     width: 84,
@@ -2824,7 +2647,6 @@ const styles = StyleSheet.create({
   emptyTitle: { color: C.white, fontSize: 19, fontWeight: '800', marginBottom: 8, letterSpacing: -0.3 },
   emptySub: { color: C.gray500, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 290 },
 
-  // ---------- History cards ----------
   historyCard: {
     backgroundColor: C.surface,
     borderRadius: 18,
@@ -2844,7 +2666,6 @@ const styles = StyleSheet.create({
 
   skeleton: { backgroundColor: C.gray700, borderRadius: 8 },
 
-  // ---------- Stops directory ----------
   stopsFootnote: { color: C.gray500, fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: 8 },
   lineHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   lineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.orange, marginRight: 10 },
@@ -2862,7 +2683,6 @@ const styles = StyleSheet.create({
   stopTag: { color: C.gray500, fontSize: 11, fontWeight: '500', marginTop: 2 },
   stopAction: { color: C.orange, fontSize: 12, fontWeight: '800' },
 
-  // ---------- Profile ----------
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2910,7 +2730,6 @@ const styles = StyleSheet.create({
   btnLogoutText: { color: C.danger, fontSize: 15, fontWeight: '700' },
   versionText: { color: C.gray700, fontSize: 12, fontWeight: '600', textAlign: 'center', marginBottom: 120 },
 
-  // ---------- Floating glass navbar ----------
   navbarWrap: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 28 : 16,
@@ -2940,7 +2759,6 @@ const styles = StyleSheet.create({
   navLabel: { fontSize: 10, fontWeight: '600', color: C.gray500 },
   navLabelActive: { color: C.orange, fontWeight: '800' },
 
-  // ---------- AR Groq Scanner ----------
   arScanBadge: {
     backgroundColor: C.orangeSoft,
     borderWidth: 1,

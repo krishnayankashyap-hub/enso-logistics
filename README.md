@@ -19,7 +19,8 @@ Transforming unused vehicle space into an intelligent relay network for farmers,
 </div>
 
 ---
-2 portals(Sender(https://enso-sender.vercel.app/) and Driver(https://enso-driver.vercel.app/) in 1 (https://enso-platform-one.vercel.app/)
+[**click Here - Main Platform "2 portals (Senders and Drivers) in one"**](https://enso-platform-one.vercel.app/) 
+
 
 
 ## 🌍 Why Enso?
@@ -35,7 +36,7 @@ Every day thousands of trucks drive with **unused cargo capacity** while farmers
 | Produce Waiting       |  Spoilage  |
 | Empty Vehicle Space   |  Waste     |
 
-A farmer in Assam shipping tomatoes to Shillong often loses profit before the shipment even arrives.
+Example - A farmer in Assam shipping tomatoes to Shillong often loses profit before the shipment even arrives.
 
 Meanwhile dozens of vehicles are already travelling the same route with available space.
 
@@ -52,6 +53,26 @@ Available Vehicle Space
           ↓
     Instant Delivery
 ```
+
+---
+
+## ⚡ The ENSO Ecosystem & Innovations
+
+ENSO is not a traditional delivery app. It is a decentralized, zero-inventory Monorepo consisting of three highly advanced technical layers:
+
+### 1. 👁️ Groq Vision™ Cargo AI (Sender Portal)
+Instead of forcing users to manually measure and weigh boxes, we integrated **Groq's LPU-powered `llama-3.2-90b-vision-instruct` model**. 
+* Senders open the AR camera interface.
+* The AI analyzes the live base64 web-stream.
+* It instantly identifies the object, calculates dimensions, and estimates the volumetric weight in real-time.
+
+### 2. 🧠 AI Relay Engine & Route Pooling (Driver Radar)
+We don't rely on a single driver for long hauls. Our AI dynamically connects overlapping routes to pass cargo seamlessly like a baton.
+* **Route Pooling:** Drivers can scan for multiple overlapping packages along their current trajectory to maximize their earnings per kilometer.
+* **Relay Handoffs:** If a driver is only going halfway, they can drop the package at a designated **AI Relay Hub**, automatically triggering a 60-second broadcast to the next driver on that highway stretch.
+
+### 3. 📍 4-Second Uber-Style Telemetry
+Using a highly optimized Firebase `onSnapshot` architecture paired with a customized **Leaflet map engine**, the Driver app pushes GPS coordinates every 4 seconds. Senders can watch the driver's truck icon move across their map in true real-time.
 
 ---
 
@@ -174,27 +195,26 @@ Create Job    →  Route Match   →   Accept Job
 
 # ⚙️ Quick Start
 
+**1. Clone the repository:**
 ```bash
-git clone https://github.com/YOUR_USERNAME/enso-logistics.git
-
+git clone [https://github.com/krishnayankashyap-hub/enso-logistics.git](https://github.com/krishnayankashyap-hub/enso-logistics.git)
 cd enso-logistics
+2. Install dependencies:
 
+Bash
 npm install
-```
+3. Run the Sender Portal:
 
-### Sender Portal
-
-```bash
+Bash
 npm run sender
-```
-
-### Driver Radar
+4. Run the Driver Radar (In a new terminal window):
 
 ```bash
 npm run driver
 ```
+Note: Ensure you have your Firebase environment configurations set up if testing locally, or simply view our live Vercel deployments.
 
-Open both applications side-by-side and watch Firebase synchronize shipments in real time.
+
 
 ---
 
@@ -225,6 +245,19 @@ Open both applications side-by-side and watch Firebase synchronize shipments in 
 ---
 
 <div align="center">
+
+🚀 TEAM ASTRANOVA
+Built with precision for the FAR AWAY Hackathon.
+
+Krishnayan Kashyap Pathak
+💻 Full-Stack Architect & Team Lead
+
+Mazharul Islam Barbhuiya
+📈 Business Strategist & Co-Lead
+
+
+
+Simplicity is the ultimate sophistication.
 
 # 🟠 ENSO
 

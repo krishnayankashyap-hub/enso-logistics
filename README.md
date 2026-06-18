@@ -11,15 +11,15 @@ Transforming unused vehicle space into an intelligent relay network for farmers,
 <p>
 <img src="https://img.shields.io/badge/React_Native-61DAFB?style=for-the-badge&logo=react&logoColor=white"/>
 <img src="https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black"/>
-<img src="https://img.shields.io/badge/Firestore-FFCA28?style=for-the-badge"/>
-<img src="https://img.shields.io/badge/AI_Relay_Engine-FF6B00?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/AI_Relay_Engine_GRoq-FF6B00?style=for-the-badge"/>
 <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge"/>
 </p>
+
+[**click Here - Main Platform "2 portals (Senders and Drivers) in one"**](https://enso-platform-one.vercel.app/) 
 
 </div>
 
 ---
-[**click Here - Main Platform "2 portals (Senders and Drivers) in one"**](https://enso-platform-one.vercel.app/) 
 
 
 
